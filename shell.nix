@@ -1,11 +1,21 @@
 { pkgs ? import <nixpkgs> {} }:
 
+let
+  lint = pkgs.writeShellScriptBin "lint" ''
+    golangci-lint run
+  '';
+
+  test = pkgs.writeShellScriptBin "test" ''
+    go test -race -coverprofile=coverage.txt ./...
+  '';
+in
 pkgs.mkShell {
   buildInputs = with pkgs; [
     go
     golangci-lint
     goreleaser
-    gnumake
+    lint
+    test
   ];
 
   shellHook = ''

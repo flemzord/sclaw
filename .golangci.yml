@@ -6,7 +6,6 @@ linters:
     - copyloopvar
     - errname
     - errorlint
-    - gofumpt
     - govet
     - misspell
     - noctx

@@ -18,7 +18,7 @@ docs/               → Additional documentation
 ### Prerequisites
 
 - **Nix** + **direnv** (recommended): `direnv allow` in the project root
-- Or manually install: Go 1.23, golangci-lint, goreleaser, make
+- Or manually install: Go, golangci-lint, goreleaser
 
 ### Setup
 
@@ -26,14 +26,13 @@ docs/               → Additional documentation
 direnv allow    # Loads shell.nix automatically
 ```
 
-## Build / Test / Lint
+## Test / Lint
+
+Commands are available directly in the Nix shell:
 
 ```bash
-make build             # Build binary → ./sclaw
-make test              # Run tests with race detector + coverage
-make lint              # Run golangci-lint
-make release-snapshot  # GoReleaser snapshot build
-make clean             # Remove build artifacts
+lint    # Run golangci-lint
+test    # Run tests with race detector + coverage
 ```
 
 ## Code Conventions
@@ -56,4 +55,3 @@ make clean             # Remove build artifacts
 | `.goreleaser.yaml` | GoReleaser v2 release config     |
 | `shell.nix`        | Nix development environment      |
 | `.envrc`           | direnv integration               |
-| `Makefile`         | Build automation shortcuts       |
