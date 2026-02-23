@@ -2,7 +2,7 @@
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    go_1_23
+    go
     golangci-lint
     goreleaser
     gnumake
