@@ -1,6 +1,6 @@
 package config
 
-import "sort"
+import "slices"
 
 // Resolve returns a sorted list of module IDs from the configuration.
 // The deterministic order ensures consistent module loading.
@@ -9,6 +9,6 @@ func Resolve(cfg *Config) []string {
 	for id := range cfg.Modules {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	return ids
 }

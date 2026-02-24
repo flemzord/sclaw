@@ -10,7 +10,7 @@ import (
 // Called after instantiation and before Provision().
 // The node contains the raw YAML for this module's config section.
 type Configurable interface {
-	Configure(node yaml.Node) error
+	Configure(node *yaml.Node) error
 }
 
 // Provisioner is implemented by modules that need setup after instantiation.

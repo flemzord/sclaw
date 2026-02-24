@@ -1,8 +1,9 @@
 package core
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -51,8 +52,8 @@ func GetModules() []ModuleInfo {
 	for _, info := range modules {
 		result = append(result, info)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+	slices.SortFunc(result, func(a, b ModuleInfo) int {
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return result
 }
@@ -71,8 +72,8 @@ func GetModulesByNamespace(namespace string) []ModuleInfo {
 			result = append(result, info)
 		}
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+	slices.SortFunc(result, func(a, b ModuleInfo) int {
+		return cmp.Compare(a.ID, b.ID)
 	})
 	return result
 }
@@ -82,9 +83,4 @@ func resetRegistry() {
 	modulesMu.Lock()
 	defer modulesMu.Unlock()
 	modules = make(map[string]ModuleInfo)
-}
-
-// ResetRegistry clears the registry. Exported for use in sibling package tests.
-func ResetRegistry() {
-	resetRegistry()
 }

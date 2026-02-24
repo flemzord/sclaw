@@ -74,7 +74,7 @@ func (ctx *AppContext) LoadModule(id string) (Module, error) {
 
 	if c, ok := mod.(Configurable); ok {
 		if node, exists := ctx.moduleConfigs[id]; exists {
-			if err := c.Configure(node); err != nil {
+			if err := c.Configure(&node); err != nil {
 				return nil, fmt.Errorf("configuring module %s: %w", id, err)
 			}
 		}

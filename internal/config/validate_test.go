@@ -32,25 +32,24 @@ func (m *configurableModule) ModuleInfo() core.ModuleInfo {
 	}
 }
 
-func (m *configurableModule) Configure(_ yaml.Node) error { return nil }
+func (m *configurableModule) Configure(_ *yaml.Node) error { return nil }
 
 func registerStub(t *testing.T, id string) {
 	t.Helper()
 	core.RegisterModule(&stubModule{id: id})
-	t.Cleanup(func() { core.ResetRegistry() })
 }
 
 func registerConfigurable(t *testing.T, id string) {
 	t.Helper()
 	core.RegisterModule(&configurableModule{stubModule: stubModule{id: id}})
-	t.Cleanup(func() { core.ResetRegistry() })
 }
 
 func TestValidate_Valid(t *testing.T) {
-	registerStub(t, "test.mod")
+	id := t.Name() + ".mod"
+	registerStub(t, id)
 	cfg := &Config{
 		Version: "1",
-		Modules: map[string]yaml.Node{"test.mod": {}},
+		Modules: map[string]yaml.Node{id: {}},
 	}
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -58,9 +57,10 @@ func TestValidate_Valid(t *testing.T) {
 }
 
 func TestValidate_MissingVersion(t *testing.T) {
-	registerStub(t, "test.mod")
+	id := t.Name() + ".mod"
+	registerStub(t, id)
 	cfg := &Config{
-		Modules: map[string]yaml.Node{"test.mod": {}},
+		Modules: map[string]yaml.Node{id: {}},
 	}
 	err := Validate(cfg)
 	if err == nil {
@@ -72,10 +72,11 @@ func TestValidate_MissingVersion(t *testing.T) {
 }
 
 func TestValidate_UnsupportedVersion(t *testing.T) {
-	registerStub(t, "test.mod")
+	id := t.Name() + ".mod"
+	registerStub(t, id)
 	cfg := &Config{
 		Version: "99",
-		Modules: map[string]yaml.Node{"test.mod": {}},
+		Modules: map[string]yaml.Node{id: {}},
 	}
 	err := Validate(cfg)
 	if err == nil {
@@ -132,10 +133,11 @@ func TestValidate_MultipleUnknown(t *testing.T) {
 }
 
 func TestValidate_ConfigurableModuleMissingConfig(t *testing.T) {
-	registerConfigurable(t, "need.config")
+	id := t.Name() + ".config"
+	registerConfigurable(t, id)
 	cfg := &Config{
 		Version: "1",
-		Modules: map[string]yaml.Node{"need.config": {}},
+		Modules: map[string]yaml.Node{id: {}},
 	}
 	// Should pass — configurable module has an entry.
 	if err := Validate(cfg); err != nil {
@@ -144,18 +146,20 @@ func TestValidate_ConfigurableModuleMissingConfig(t *testing.T) {
 }
 
 func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
-	registerConfigurable(t, "need.config")
-	registerStub(t, "other.mod")
+	cfgID := t.Name() + ".config"
+	stubID := t.Name() + ".other"
+	registerConfigurable(t, cfgID)
+	registerStub(t, stubID)
 	cfg := &Config{
 		Version: "1",
-		Modules: map[string]yaml.Node{"other.mod": {}},
+		Modules: map[string]yaml.Node{stubID: {}},
 	}
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error for configurable module without config entry")
 	}
-	if !strings.Contains(err.Error(), "need.config") {
-		t.Errorf("error should mention need.config: %v", err)
+	if !strings.Contains(err.Error(), cfgID) {
+		t.Errorf("error should mention %s: %v", cfgID, err)
 	}
 	if !strings.Contains(err.Error(), "requires configuration") {
 		t.Errorf("error should mention requires configuration: %v", err)

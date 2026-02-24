@@ -121,12 +121,12 @@ func configCmd() *cobra.Command {
 			appCtx := core.NewAppContext(logger, defaultDataDir(), defaultWorkspace())
 			appCtx = appCtx.WithModuleConfigs(cfg.Modules)
 
+			app := core.NewApp(appCtx)
 			ids := config.Resolve(cfg)
-			for _, id := range ids {
-				if _, err := appCtx.LoadModule(id); err != nil {
-					return fmt.Errorf("module %s: %w", id, err)
-				}
+			if err := app.LoadModules(ids); err != nil {
+				return err
 			}
+			defer app.Stop()
 
 			fmt.Printf("Configuration OK (%d modules)\n", len(ids))
 			for _, id := range ids {
@@ -141,7 +141,7 @@ func configCmd() *cobra.Command {
 // resolveConfigPath searches for a config file in standard locations.
 // Search order: $XDG_CONFIG_HOME/sclaw/sclaw.yaml → ./sclaw.yaml
 func resolveConfigPath() (string, error) {
-	candidates := []string{}
+	var candidates []string
 
 	if xdg, ok := os.LookupEnv("XDG_CONFIG_HOME"); ok {
 		candidates = append(candidates, filepath.Join(xdg, "sclaw", "sclaw.yaml"))

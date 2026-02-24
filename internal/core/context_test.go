@@ -153,7 +153,7 @@ func (m *configurableMod) ModuleInfo() ModuleInfo {
 	}
 }
 
-func (m *configurableMod) Configure(node yaml.Node) error {
+func (m *configurableMod) Configure(node *yaml.Node) error {
 	if m.configErr != nil {
 		return m.configErr
 	}
