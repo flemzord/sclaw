@@ -39,13 +39,16 @@ type AuthProfile struct {
 	idx  int
 }
 
+// ErrNoKeys is returned when NewAuthProfile is called without any keys.
+var ErrNoKeys = errors.New("AuthProfile requires at least one key")
+
 // NewAuthProfile creates an AuthProfile with the given keys.
 // At least one key is required.
-func NewAuthProfile(keys ...string) *AuthProfile {
+func NewAuthProfile(keys ...string) (*AuthProfile, error) {
 	if len(keys) == 0 {
-		panic("AuthProfile requires at least one key")
+		return nil, ErrNoKeys
 	}
-	return &AuthProfile{keys: keys}
+	return &AuthProfile{keys: keys}, nil
 }
 
 // CurrentKey returns the currently active API key.
@@ -273,8 +276,7 @@ func (pc *Chain) Stream(ctx context.Context, role Role, req CompletionRequest) (
 
 		ch, err := e.Provider.Stream(ctx, req)
 		if err == nil {
-			e.health.RecordSuccess()
-			return ch, nil
+			return pc.wrapStream(ch, e), nil
 		}
 
 		lastErr = err
@@ -312,6 +314,32 @@ func (pc *Chain) Stream(ctx context.Context, role Role, req CompletionRequest) (
 	return nil, fmt.Errorf("%w for role %q: all candidates unavailable", ErrAllProviders, role)
 }
 
+// wrapStream wraps a provider's stream channel to defer the health verdict.
+// RecordSuccess is only called if the entire stream completes without retryable errors.
+// Mid-stream retryable errors trigger RecordFailure immediately.
+func (pc *Chain) wrapStream(src <-chan StreamChunk, e *chainEntry) <-chan StreamChunk {
+	out := make(chan StreamChunk, cap(src))
+	go func() {
+		defer close(out)
+		var sawError bool
+		for chunk := range src {
+			if chunk.Err != nil && IsRetryable(chunk.Err) {
+				sawError = true
+				e.health.RecordFailure()
+				pc.logger.Warn("mid-stream error degraded provider health",
+					"provider", e.Name,
+					"error", chunk.Err,
+				)
+			}
+			out <- chunk
+		}
+		if !sawError {
+			e.health.RecordSuccess()
+		}
+	}()
+	return out
+}
+
 // minHealthCheckInterval returns the shortest configured check interval
 // across all chain entries. Invalid or zero values fall back to defaults.
 func minHealthCheckInterval(entries []chainEntry) time.Duration {
@@ -319,15 +347,10 @@ func minHealthCheckInterval(entries []chainEntry) time.Duration {
 		return 10 * time.Second
 	}
 
-	cfg := entries[0].Health
-	cfg.defaults()
-	interval := cfg.CheckInterval
-
+	interval := entries[0].Health.checkIntervalOrDefault()
 	for i := 1; i < len(entries); i++ {
-		cfg = entries[i].Health
-		cfg.defaults()
-		if cfg.CheckInterval < interval {
-			interval = cfg.CheckInterval
+		if d := entries[i].Health.checkIntervalOrDefault(); d < interval {
+			interval = d
 		}
 	}
 	return interval

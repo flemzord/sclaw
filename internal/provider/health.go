@@ -47,6 +47,15 @@ type HealthConfig struct {
 	CheckInterval time.Duration
 }
 
+// checkIntervalOrDefault returns the configured CheckInterval, or the
+// default (10s) if unset or invalid. Value receiver: read-only, no mutation.
+func (c HealthConfig) checkIntervalOrDefault() time.Duration {
+	if c.CheckInterval <= 0 {
+		return 10 * time.Second
+	}
+	return c.CheckInterval
+}
+
 // defaults fills zero-value fields with sensible defaults.
 func (c *HealthConfig) defaults() {
 	if c.InitialBackoff <= 0 {

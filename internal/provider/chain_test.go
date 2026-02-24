@@ -339,7 +339,10 @@ func TestProviderChain_FallbackRestricted(t *testing.T) {
 func TestProviderChain_AuthRotation(t *testing.T) {
 	t.Parallel()
 
-	auth := provider.NewAuthProfile("key1", "key2", "key3")
+	auth, err := provider.NewAuthProfile("key1", "key2", "key3")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if auth.CurrentKey() != "key1" {
 		t.Fatalf("initial key = %q, want %q", auth.CurrentKey(), "key1")
 	}
@@ -721,7 +724,10 @@ func TestProviderChain_ConcurrentAccess(t *testing.T) {
 func TestAuthProfile_Rotation(t *testing.T) {
 	t.Parallel()
 
-	auth := provider.NewAuthProfile("a", "b", "c")
+	auth, err := provider.NewAuthProfile("a", "b", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if got := auth.CurrentKey(); got != "a" {
 		t.Fatalf("initial = %q, want %q", got, "a")
@@ -746,7 +752,10 @@ func TestAuthProfile_Rotation(t *testing.T) {
 func TestAuthProfile_SingleKey(t *testing.T) {
 	t.Parallel()
 
-	auth := provider.NewAuthProfile("only")
+	auth, err := provider.NewAuthProfile("only")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if rotated := auth.Rotate(); rotated {
 		t.Error("single key should not rotate")
 	}
@@ -758,7 +767,10 @@ func TestAuthProfile_SingleKey(t *testing.T) {
 func TestAuthProfile_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
-	auth := provider.NewAuthProfile("a", "b", "c")
+	auth, err := provider.NewAuthProfile("a", "b", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(2)
@@ -868,7 +880,10 @@ func TestProviderChain_LogsAuthRotation(t *testing.T) {
 
 	logger, buf := testLogger()
 
-	auth := provider.NewAuthProfile("key1", "key2")
+	auth, err := provider.NewAuthProfile("key1", "key2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	calls := 0
 	p := &providertest.MockProvider{
 		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
@@ -1092,5 +1107,114 @@ func TestProviderChain_NoLogWithoutLogger(t *testing.T) {
 	}
 	if resp.Content != "p2" {
 		t.Errorf("content = %q, want %q", resp.Content, "p2")
+	}
+}
+
+func TestNewAuthProfile_EmptyKeys(t *testing.T) {
+	t.Parallel()
+
+	_, err := provider.NewAuthProfile()
+	if !errors.Is(err, provider.ErrNoKeys) {
+		t.Fatalf("err = %v, want ErrNoKeys", err)
+	}
+}
+
+func TestProviderChain_StreamMidStreamError(t *testing.T) {
+	t.Parallel()
+
+	logger, buf := testLogger()
+
+	p := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
+			return provider.CompletionResponse{}, nil
+		},
+		StreamFunc: func(_ context.Context, _ provider.CompletionRequest) (<-chan provider.StreamChunk, error) {
+			ch := make(chan provider.StreamChunk, 3)
+			ch <- provider.StreamChunk{Content: "hello "}
+			ch <- provider.StreamChunk{Err: provider.ErrProviderDown} // mid-stream retryable error
+			ch <- provider.StreamChunk{Content: "world"}
+			close(ch)
+			return ch, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "flaky" },
+		HealthCheckFunc:       func(_ context.Context) error { return nil },
+	}
+
+	chain, err := provider.NewChain([]provider.ChainEntry{
+		{
+			Name:     "flaky",
+			Provider: p,
+			Role:     provider.RolePrimary,
+			Health:   provider.HealthConfig{MaxFailures: 5},
+		},
+	}, provider.WithLogger(logger))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch, err := chain.Stream(context.Background(), provider.RolePrimary, provider.CompletionRequest{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Consume all chunks.
+	chunks := make([]provider.StreamChunk, 0, 3)
+	for c := range ch {
+		chunks = append(chunks, c)
+	}
+
+	// All 3 chunks should be forwarded.
+	if len(chunks) != 3 {
+		t.Fatalf("chunks = %d, want 3", len(chunks))
+	}
+	if chunks[0].Content != "hello " {
+		t.Errorf("chunk[0] = %q, want %q", chunks[0].Content, "hello ")
+	}
+	if chunks[1].Err == nil {
+		t.Error("chunk[1] should have an error")
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "mid-stream error degraded provider health") {
+		t.Errorf("expected mid-stream error log, got:\n%s", logs)
+	}
+	if !strings.Contains(logs, "provider=flaky") {
+		t.Errorf("expected provider name in log, got:\n%s", logs)
+	}
+}
+
+func TestProviderChain_StreamSuccessAfterFullConsumption(t *testing.T) {
+	t.Parallel()
+
+	p := okProvider("streamer")
+	chain, err := provider.NewChain([]provider.ChainEntry{
+		{
+			Name:     "streamer",
+			Provider: p,
+			Role:     provider.RolePrimary,
+			Health:   provider.HealthConfig{MaxFailures: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ch, err := chain.Stream(context.Background(), provider.RolePrimary, provider.CompletionRequest{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+
+	// Consume all chunks — success should be recorded after full drain.
+	for range ch { //nolint:revive // intentional drain
+	}
+
+	// Verify provider is still healthy by making another call.
+	resp, err := chain.Complete(context.Background(), provider.RolePrimary, provider.CompletionRequest{})
+	if err != nil {
+		t.Fatalf("Complete after stream: %v", err)
+	}
+	if resp.Content != "streamer" {
+		t.Errorf("content = %q, want %q", resp.Content, "streamer")
 	}
 }

@@ -444,3 +444,26 @@ func TestHealthState_String(t *testing.T) {
 		}
 	}
 }
+
+func TestHealthConfig_CheckIntervalOrDefault(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  HealthConfig
+		want time.Duration
+	}{
+		{"zero", HealthConfig{}, 10 * time.Second},
+		{"negative", HealthConfig{CheckInterval: -1}, 10 * time.Second},
+		{"custom", HealthConfig{CheckInterval: 5 * time.Second}, 5 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.cfg.checkIntervalOrDefault(); got != tt.want {
+				t.Errorf("checkIntervalOrDefault() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
