@@ -14,6 +14,20 @@ const (
 	stateDead                 // too many consecutive failures
 )
 
+// String returns a human-readable label for the health state.
+func (s healthState) String() string {
+	switch s {
+	case stateHealthy:
+		return "healthy"
+	case stateCooldown:
+		return "cooldown"
+	case stateDead:
+		return "dead"
+	default:
+		return "unknown"
+	}
+}
+
 // HealthConfig controls health tracking behavior.
 type HealthConfig struct {
 	// InitialBackoff is the cooldown duration after the first failure.
@@ -55,6 +69,10 @@ func (c *HealthConfig) defaults() {
 type healthTracker struct {
 	cfg HealthConfig
 
+	// onStateChange is called outside the lock whenever the health
+	// state transitions. It keeps the tracker decoupled from logging.
+	onStateChange func(from, to healthState)
+
 	mu              sync.Mutex
 	state           healthState
 	failures        int
@@ -94,38 +112,45 @@ func (h *healthTracker) IsAvailable() bool {
 // RecordSuccess resets the tracker to the healthy state.
 func (h *healthTracker) RecordSuccess() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	prev := h.state
 	h.state = stateHealthy
 	h.failures = 0
 	h.currentBackoff = 0
+	h.mu.Unlock()
+
+	if prev != stateHealthy && h.onStateChange != nil {
+		h.onStateChange(prev, stateHealthy)
+	}
 }
 
 // RecordFailure records a failed request. It transitions the tracker
 // to cooldown (with exponential backoff) or dead after MaxFailures.
 func (h *healthTracker) RecordFailure() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	prev := h.state
 	h.failures++
 
+	var newState healthState
 	if h.failures >= h.cfg.MaxFailures {
-		h.state = stateDead
-		return
-	}
-
-	h.state = stateCooldown
-
-	if h.currentBackoff == 0 {
-		h.currentBackoff = h.cfg.InitialBackoff
+		newState = stateDead
 	} else {
-		h.currentBackoff *= 2
+		newState = stateCooldown
+		if h.currentBackoff == 0 {
+			h.currentBackoff = h.cfg.InitialBackoff
+		} else {
+			h.currentBackoff *= 2
+		}
+		if h.currentBackoff > h.cfg.MaxBackoff {
+			h.currentBackoff = h.cfg.MaxBackoff
+		}
+		h.cooldownExpires = h.now().Add(h.currentBackoff)
 	}
-	if h.currentBackoff > h.cfg.MaxBackoff {
-		h.currentBackoff = h.cfg.MaxBackoff
-	}
+	h.state = newState
+	h.mu.Unlock()
 
-	h.cooldownExpires = h.now().Add(h.currentBackoff)
+	if prev != newState && h.onStateChange != nil {
+		h.onStateChange(prev, newState)
+	}
 }
 
 // ShouldHealthCheck reports whether the provider needs an active
@@ -156,4 +181,11 @@ func (h *healthTracker) Failures() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.failures
+}
+
+// CurrentBackoff returns the current backoff duration.
+func (h *healthTracker) CurrentBackoff() time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.currentBackoff
 }

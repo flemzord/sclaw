@@ -327,3 +327,120 @@ func TestHealthConfig_InvalidValuesFallback(t *testing.T) {
 		t.Errorf("CheckInterval = %v, want 10s", cfg.CheckInterval)
 	}
 }
+
+func TestHealthTracker_OnStateChange_Cooldown(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestTracker(HealthConfig{MaxFailures: 3})
+
+	var transitions []struct{ from, to healthState }
+	h.onStateChange = func(from, to healthState) {
+		transitions = append(transitions, struct{ from, to healthState }{from, to})
+	}
+
+	h.RecordFailure() // healthy → cooldown
+
+	if len(transitions) != 1 {
+		t.Fatalf("transitions = %d, want 1", len(transitions))
+	}
+	if transitions[0].from != stateHealthy || transitions[0].to != stateCooldown {
+		t.Errorf("transition = %v→%v, want healthy→cooldown", transitions[0].from, transitions[0].to)
+	}
+}
+
+func TestHealthTracker_OnStateChange_Dead(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestTracker(HealthConfig{MaxFailures: 2})
+
+	var transitions []struct{ from, to healthState }
+	h.onStateChange = func(from, to healthState) {
+		transitions = append(transitions, struct{ from, to healthState }{from, to})
+	}
+
+	h.RecordFailure() // healthy → cooldown
+	h.RecordFailure() // cooldown → dead
+
+	if len(transitions) != 2 {
+		t.Fatalf("transitions = %d, want 2", len(transitions))
+	}
+	if transitions[1].from != stateCooldown || transitions[1].to != stateDead {
+		t.Errorf("transition = %v→%v, want cooldown→dead", transitions[1].from, transitions[1].to)
+	}
+}
+
+func TestHealthTracker_OnStateChange_Revival(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestTracker(HealthConfig{MaxFailures: 2})
+
+	var transitions []struct{ from, to healthState }
+	h.onStateChange = func(from, to healthState) {
+		transitions = append(transitions, struct{ from, to healthState }{from, to})
+	}
+
+	h.RecordFailure() // healthy → cooldown
+	h.RecordFailure() // cooldown → dead
+	h.RecordSuccess() // dead → healthy
+
+	if len(transitions) != 3 {
+		t.Fatalf("transitions = %d, want 3", len(transitions))
+	}
+	if transitions[2].from != stateDead || transitions[2].to != stateHealthy {
+		t.Errorf("transition = %v→%v, want dead→healthy", transitions[2].from, transitions[2].to)
+	}
+}
+
+func TestHealthTracker_OnStateChange_NotCalledWhenNoChange(t *testing.T) {
+	t.Parallel()
+	h, _ := newTestTracker(HealthConfig{})
+
+	called := false
+	h.onStateChange = func(_, _ healthState) {
+		called = true
+	}
+
+	// Already healthy, RecordSuccess should not trigger callback.
+	h.RecordSuccess()
+
+	if called {
+		t.Error("onStateChange should not be called when state does not change")
+	}
+}
+
+func TestHealthTracker_CurrentBackoff(t *testing.T) {
+	t.Parallel()
+	h, ft := newTestTracker(HealthConfig{InitialBackoff: time.Second, MaxFailures: 10})
+
+	if h.CurrentBackoff() != 0 {
+		t.Errorf("initial backoff = %v, want 0", h.CurrentBackoff())
+	}
+
+	h.RecordFailure()
+	if h.CurrentBackoff() != time.Second {
+		t.Errorf("backoff after 1st failure = %v, want 1s", h.CurrentBackoff())
+	}
+
+	ft.Advance(2 * time.Second)
+	h.RecordFailure()
+	if h.CurrentBackoff() != 2*time.Second {
+		t.Errorf("backoff after 2nd failure = %v, want 2s", h.CurrentBackoff())
+	}
+}
+
+func TestHealthState_String(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		state healthState
+		want  string
+	}{
+		{stateHealthy, "healthy"},
+		{stateCooldown, "cooldown"},
+		{stateDead, "dead"},
+		{healthState(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		if got := tt.state.String(); got != tt.want {
+			t.Errorf("healthState(%d).String() = %q, want %q", tt.state, got, tt.want)
+		}
+	}
+}
