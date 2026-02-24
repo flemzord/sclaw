@@ -47,8 +47,8 @@ func expandEnv(raw []byte) ([]byte, error) {
 			defaultVal = string(subs[2])
 		}
 
-		value := os.Getenv(name)
-		if value != "" {
+		value, ok := os.LookupEnv(name)
+		if ok {
 			return []byte(value)
 		}
 
