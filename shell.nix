@@ -5,7 +5,7 @@ let
     golangci-lint run
   '';
 
-  test = pkgs.writeShellScriptBin "test" ''
+  run-tests = pkgs.writeShellScriptBin "run-tests" ''
     go test -race -coverprofile=coverage.txt ./...
   '';
 in
@@ -15,7 +15,7 @@ pkgs.mkShell {
     golangci-lint
     goreleaser
     lint
-    test
+    run-tests
   ];
 
   shellHook = ''
