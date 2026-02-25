@@ -7,6 +7,8 @@ import (
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
+const defaultTypingInterval = time.Second
+
 // StreamingChannel is implemented by channels that support streaming partial
 // responses to the user as they are generated.
 type StreamingChannel interface {
@@ -35,6 +37,10 @@ type TypingChannel interface {
 // given interval until the context is cancelled. It is safe to call from
 // multiple goroutines; the loop stops when ctx is done.
 func StartTypingLoop(ctx context.Context, ch TypingChannel, chat message.Chat, interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultTypingInterval
+	}
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()

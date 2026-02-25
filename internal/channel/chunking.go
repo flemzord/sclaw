@@ -76,55 +76,113 @@ func splitText(text string, cfg ChunkConfig) []string {
 
 	var chunks []string
 	var current strings.Builder
+	currentLen := 0
 
-	inCodeBlock := false
-
-	for _, line := range lines {
-		lineWithNewline := line + "\n"
-
-		isFence := strings.HasPrefix(strings.TrimSpace(line), "```")
-
-		// Track fenced code block boundaries.
-		// We update the flag after the overflow check so that the closing
-		// fence is still considered "inside" the code block.
-		wasInCodeBlock := inCodeBlock
-		if isFence {
-			inCodeBlock = !inCodeBlock
+	flush := func() {
+		if currentLen == 0 {
+			return
 		}
+		chunks = append(chunks, current.String())
+		current.Reset()
+		currentLen = 0
+	}
 
-		// If adding this line would exceed the limit...
-		if current.Len()+len(lineWithNewline) > cfg.MaxLength {
-			// If we're preserving blocks and inside a code block (including
-			// the closing fence line), keep accumulating until the block ends
-			// — but only if the accumulated text still has a chance to fit
-			// (< 2x limit as a safety valve).
-			stillInBlock := wasInCodeBlock || (isFence && !inCodeBlock)
-			if cfg.PreserveBlocks && stillInBlock && current.Len() < cfg.MaxLength*2 {
-				current.WriteString(lineWithNewline)
-				continue
-			}
+	for i := 0; i < len(lines); {
+		line := lines[i]
 
-			// Flush the current chunk if non-empty.
-			if current.Len() > 0 {
-				chunks = append(chunks, strings.TrimRight(current.String(), "\n"))
-				current.Reset()
-			}
-
-			// If a single line exceeds MaxLength, force-split it.
-			if len(lineWithNewline) > cfg.MaxLength {
-				chunks = append(chunks, forceSplit(line, cfg.MaxLength)...)
-				continue
+		// Best-effort block preservation: if a fenced block fully fits the max
+		// length, move it as a single unit instead of splitting it line by line.
+		if cfg.PreserveBlocks && isFenceLine(line) {
+			end, found := findFenceEnd(lines, i)
+			if found {
+				block := strings.Join(lines[i:end+1], "\n")
+				if len(block) <= cfg.MaxLength {
+					appendPiece(&current, &currentLen, &chunks, block, cfg.MaxLength)
+					i = end + 1
+					continue
+				}
 			}
 		}
 
-		current.WriteString(lineWithNewline)
+		appendLine(&current, &currentLen, &chunks, line, cfg.MaxLength)
+		i++
 	}
 
-	if current.Len() > 0 {
-		chunks = append(chunks, strings.TrimRight(current.String(), "\n"))
-	}
+	flush()
 
 	return chunks
+}
+
+func appendPiece(current *strings.Builder, currentLen *int, chunks *[]string, piece string, maxLen int) {
+	if piece == "" {
+		appendLine(current, currentLen, chunks, "", maxLen)
+		return
+	}
+
+	added := len(piece)
+	if *currentLen > 0 {
+		added++
+	}
+	if *currentLen+added > maxLen {
+		if *currentLen > 0 {
+			*chunks = append(*chunks, current.String())
+			current.Reset()
+			*currentLen = 0
+		}
+	}
+
+	if len(piece) <= maxLen {
+		if *currentLen > 0 {
+			current.WriteByte('\n')
+			*currentLen = *currentLen + 1
+		}
+		current.WriteString(piece)
+		*currentLen += len(piece)
+		return
+	}
+
+	*chunks = append(*chunks, forceSplit(piece, maxLen)...)
+}
+
+func appendLine(current *strings.Builder, currentLen *int, chunks *[]string, line string, maxLen int) {
+	if len(line) > maxLen {
+		if *currentLen > 0 {
+			*chunks = append(*chunks, current.String())
+			current.Reset()
+			*currentLen = 0
+		}
+		*chunks = append(*chunks, forceSplit(line, maxLen)...)
+		return
+	}
+
+	added := len(line)
+	if *currentLen > 0 {
+		added++
+	}
+	if *currentLen+added > maxLen {
+		*chunks = append(*chunks, current.String())
+		current.Reset()
+		*currentLen = 0
+	}
+	if *currentLen > 0 {
+		current.WriteByte('\n')
+		*currentLen = *currentLen + 1
+	}
+	current.WriteString(line)
+	*currentLen += len(line)
+}
+
+func isFenceLine(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "```")
+}
+
+func findFenceEnd(lines []string, start int) (int, bool) {
+	for i := start + 1; i < len(lines); i++ {
+		if isFenceLine(lines[i]) {
+			return i, true
+		}
+	}
+	return -1, false
 }
 
 // forceSplit breaks a single long line into chunks of at most maxLen bytes.

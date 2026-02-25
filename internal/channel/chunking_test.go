@@ -73,6 +73,29 @@ func TestSplitMessage_PreservesCodeBlocks(t *testing.T) {
 	}
 }
 
+func TestSplitMessage_PreserveBlocksStillRespectsMaxLength(t *testing.T) {
+	t.Parallel()
+
+	code := "```\n" + strings.Repeat("x", 120) + "\n```"
+	msg := textMsg("Before\n" + code + "\nAfter")
+	maxLen := 60
+
+	result := SplitMessage(msg, ChunkConfig{
+		MaxLength:      maxLen,
+		PreserveBlocks: true,
+	})
+
+	if len(result) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(result))
+	}
+	for i, r := range result {
+		content := r.TextContent()
+		if len(content) > maxLen {
+			t.Fatalf("chunk %d exceeds max length: %d > %d", i, len(content), maxLen)
+		}
+	}
+}
+
 func TestSplitMessage_NonTextBlocksInFirstChunk(t *testing.T) {
 	t.Parallel()
 	msg := message.OutboundMessage{
