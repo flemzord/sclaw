@@ -43,10 +43,6 @@ func (d *loopDetector) record(name string, args json.RawMessage) bool {
 	return d.counts[key] >= d.threshold
 }
 
-func (d *loopDetector) reset() {
-	d.counts = make(map[string]int)
-}
-
 // tokenTracker accumulates token usage and checks against a budget.
 //
 // It is not concurrent-safe by design: each instance is owned by a single

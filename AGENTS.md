@@ -60,11 +60,14 @@ run-tests  # Run tests with race detector + coverage
 - **Prefer O(1) lookups**: Normalize data at the source (e.g., trim map keys during validation) so that resolution functions can use direct map lookups instead of iterating.
 - **Pass large structs by pointer**: Types like `yaml.Node` that contain subtrees should be passed as `*yaml.Node` to avoid unnecessary copying.
 - **Nil slices over empty slices**: Prefer `var candidates []string` over `candidates := []string{}`. Nil slices are more idiomatic in Go and work the same with `append`.
+- **Bound append-only collections**: Any in-memory append-only collection (session history, logs, caches) must have a cap, truncation, or eviction strategy. Unbounded growth causes OOM and context window overflow.
+- **Gate expensive safety nets**: If a safety-net check (like JSON parsing) runs on every message, gate it behind a cheap pre-check (e.g., `if msg.Raw != nil`) to avoid paying the cost on the common path.
 
 ### Concurrency
 
 - **Encapsulate channels behind methods**: Never export raw channels. Expose a method with state validation (e.g., `Respond()` that checks if an approval is pending) to prevent misuse of concurrent primitives.
 - **Defer health verdicts**: When tracking provider health, record success only after the full operation completes (including stream consumption), not just at connection time. Mid-stream errors must degrade health.
+- **Acquire locks before sharing pointers**: Never pass a pointer to shared mutable state (e.g., `*Session`) to a function before acquiring the lock that protects it. Move the call after lock acquisition, or pass only immutable identifiers (like a session ID) instead of the live pointer.
 
 ### Code Quality
 
@@ -72,6 +75,9 @@ run-tests  # Run tests with race detector + coverage
 - **Avoid mutating value copies**: When you need to read a field with a default, use a pure reader method with a value receiver (e.g., `checkIntervalOrDefault()`) instead of calling a mutating method on a copy.
 - **Use modern Go idioms**: Prefer `slices.Sort` over `sort.Strings`, `slices.Contains` over custom `inList()` helpers, and `os.LookupEnv` over `os.Getenv` when you need to distinguish empty from unset.
 - **Document design decisions**: When a design choice might surprise a reader (e.g., scopes validated at registration but not enforced at execution), add a comment explaining the intent and where the responsibility lies.
+- **UTF-8 safety in string splitting**: When splitting strings by byte index, always walk back to a valid UTF-8 rune boundary using `utf8.RuneStart`. Never assume byte index equals character boundary.
+- **Never reimplement stdlib**: Prefer `strings.TrimSpace`, `strings.Contains`, `strings.Split` over custom equivalents. Custom helpers miss edge cases (e.g., `\v`, `\f` whitespace characters).
+- **Consecutive error circuit breaker**: Background loops that call external services (typing indicators, health checks) should stop after N consecutive errors instead of retrying indefinitely until context cancellation.
 
 ### Testing
 

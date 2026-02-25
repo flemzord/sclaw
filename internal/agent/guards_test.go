@@ -41,18 +41,6 @@ func TestLoopDetector_DifferentArgs(t *testing.T) {
 	}
 }
 
-func TestLoopDetector_Reset(t *testing.T) {
-	t.Parallel()
-	d := newLoopDetector(2)
-
-	d.record("read", json.RawMessage(`{"file":"a.txt"}`))
-	d.reset()
-
-	if d.record("read", json.RawMessage(`{"file":"a.txt"}`)) {
-		t.Error("expected no loop after reset")
-	}
-}
-
 func TestTokenTracker_Add(t *testing.T) {
 	t.Parallel()
 	tr := newTokenTracker(1000)
