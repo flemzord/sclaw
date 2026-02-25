@@ -199,6 +199,28 @@ func TestParseExtractedFacts(t *testing.T) {
 	}
 }
 
+func TestParseExtractedFacts_UniqueIDsAcrossCalls(t *testing.T) {
+	t.Parallel()
+
+	exchange := testExchange()
+	response := "- first fact\n- second fact"
+
+	first := parseExtractedFacts(response, exchange)
+	second := parseExtractedFacts(response, exchange)
+
+	if len(first) != 2 || len(second) != 2 {
+		t.Fatalf("expected 2 facts per call, got %d and %d", len(first), len(second))
+	}
+
+	seen := make(map[string]struct{}, 4)
+	for _, f := range append(first, second...) {
+		if _, exists := seen[f.ID]; exists {
+			t.Fatalf("duplicate fact ID detected: %q", f.ID)
+		}
+		seen[f.ID] = struct{}{}
+	}
+}
+
 func TestSplitLines(t *testing.T) {
 	t.Parallel()
 

@@ -44,7 +44,7 @@ func (am *ApprovalManager) Register(id string, approval *tool.PendingApproval, s
 	}
 }
 
-// Resolve sends an approval response to the pending approval's ResponseChan.
+// Resolve sends an approval response to the pending approval flow.
 // Returns true if the approval was found and resolved.
 // This bypasses the lane lock entirely — approval responses go directly to the agent.
 func (am *ApprovalManager) Resolve(id string, response tool.ApprovalResponse) bool {
@@ -59,13 +59,7 @@ func (am *ApprovalManager) Resolve(id string, response tool.ApprovalResponse) bo
 		return false
 	}
 
-	// Non-blocking send — if channel is full or closed, skip.
-	select {
-	case entry.approval.ResponseChan <- response:
-		return true
-	default:
-		return false
-	}
+	return entry.approval.Respond(response)
 }
 
 // Remove cleans up a pending approval entry (e.g., after timeout).

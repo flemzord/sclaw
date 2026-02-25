@@ -22,8 +22,8 @@ func TestPendingApproval_InitialState(t *testing.T) {
 	if p.State() != StateIdle {
 		t.Errorf("initial state: got %d, want %d (StateIdle)", p.State(), StateIdle)
 	}
-	if p.ResponseChan == nil {
-		t.Fatal("ResponseChan should be initialized")
+	if p.Respond(ApprovalResponse{Approved: true}) {
+		t.Fatal("Respond should fail when no approval is pending")
 	}
 }
 
@@ -52,14 +52,19 @@ func TestPendingApproval_Approved(t *testing.T) {
 	}
 }
 
-func TestPendingApproval_ApprovedViaResponseChan(t *testing.T) {
+func TestPendingApproval_ApprovedViaRespond(t *testing.T) {
 	t.Parallel()
 
 	p := NewPendingApproval()
 
 	go func() {
-		time.Sleep(20 * time.Millisecond)
-		p.ResponseChan <- ApprovalResponse{Approved: true, Reason: "inline approve"}
+		deadline := time.Now().Add(200 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if p.Respond(ApprovalResponse{Approved: true, Reason: "inline approve"}) {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}()
 
 	resp, err := p.Begin(context.Background(), nil, ApprovalRequest{
@@ -70,7 +75,7 @@ func TestPendingApproval_ApprovedViaResponseChan(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !resp.Approved {
-		t.Fatal("expected approval via ResponseChan")
+		t.Fatal("expected approval via Respond")
 	}
 	if resp.Reason != "inline approve" {
 		t.Fatalf("reason = %q, want %q", resp.Reason, "inline approve")

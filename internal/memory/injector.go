@@ -37,15 +37,13 @@ func InjectMemory(
 	}
 
 	var result []string
-	usedTokens := 0
 
 	for i := range facts {
-		tokens := estimator.Estimate(facts[i].Content)
-		if usedTokens+tokens > maxTokens {
+		candidate := append(result, facts[i].Content)
+		if estimator.Estimate(FormatFacts(candidate)) > maxTokens {
 			break
 		}
-		result = append(result, facts[i].Content)
-		usedTokens += tokens
+		result = candidate
 	}
 
 	return result, nil

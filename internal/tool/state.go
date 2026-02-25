@@ -20,16 +20,16 @@ const (
 // PendingApproval manages the state machine for a single approval flow.
 // It transitions: idle → pending → (response | timeout → deny-by-default).
 type PendingApproval struct {
-	mu           sync.Mutex
-	state        ApprovalState
-	ResponseChan chan ApprovalResponse
+	mu         sync.Mutex
+	state      ApprovalState
+	responseCh chan ApprovalResponse
 }
 
 // NewPendingApproval creates a new PendingApproval in the idle state.
 func NewPendingApproval() *PendingApproval {
 	return &PendingApproval{
-		state:        StateIdle,
-		ResponseChan: make(chan ApprovalResponse, 1),
+		state:      StateIdle,
+		responseCh: make(chan ApprovalResponse, 1),
 	}
 }
 
@@ -56,10 +56,10 @@ func (p *PendingApproval) Begin(
 		return ApprovalResponse{}, ErrDenied
 	}
 	p.state = StatePending
-	if p.ResponseChan == nil {
-		p.ResponseChan = make(chan ApprovalResponse, 1)
+	if p.responseCh == nil {
+		p.responseCh = make(chan ApprovalResponse, 1)
 	}
-	respCh := p.ResponseChan
+	respCh := p.responseCh
 	p.mu.Unlock()
 
 	defer func() {
@@ -124,5 +124,24 @@ func (p *PendingApproval) Begin(
 			return timeoutResp, ErrApprovalTimeout
 		}
 		return ApprovalResponse{}, ctx.Err()
+	}
+}
+
+// Respond delivers a user decision to a pending approval flow.
+// It returns false if no approval is pending or if the response queue is full.
+func (p *PendingApproval) Respond(response ApprovalResponse) bool {
+	p.mu.Lock()
+	if p.state != StatePending || p.responseCh == nil {
+		p.mu.Unlock()
+		return false
+	}
+	respCh := p.responseCh
+	p.mu.Unlock()
+
+	select {
+	case respCh <- response:
+		return true
+	default:
+		return false
 	}
 }

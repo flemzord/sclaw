@@ -174,6 +174,24 @@ func TestInjectMemory_MaxTokensZero(t *testing.T) {
 	}
 }
 
+func TestInjectMemory_TokenBudgetIncludesFormattingOverhead(t *testing.T) {
+	t.Parallel()
+
+	store := memory.NewInMemoryStore()
+	seedStore(t, store, []memory.Fact{
+		{ID: "f1", Content: "short", CreatedAt: time.Now()},
+	})
+
+	est := mockEstimator{}
+	result, err := memory.InjectMemory(context.Background(), store, "short", 10, 1, est)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Fatalf("expected nil result when budget cannot fit formatted memory section, got %v", result)
+	}
+}
+
 func TestFormatFacts_Empty(t *testing.T) {
 	t.Parallel()
 

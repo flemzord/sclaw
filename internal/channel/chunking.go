@@ -20,53 +20,75 @@ type ChunkConfig struct {
 }
 
 // SplitMessage splits an outbound message into multiple messages that each
-// respect cfg.MaxLength. Non-text blocks are passed through unchanged in
-// the first chunk. If the message already fits, a single-element slice is returned.
+// respect cfg.MaxLength while preserving the original block order.
+// If the message already fits, a single-element slice is returned.
 func SplitMessage(msg message.OutboundMessage, cfg ChunkConfig) []message.OutboundMessage {
 	if cfg.MaxLength <= 0 {
 		return []message.OutboundMessage{msg}
 	}
 
-	// Separate text blocks from non-text blocks.
-	var textParts []string
-	var nonText []message.ContentBlock
-	for _, b := range msg.Blocks {
-		if b.Type == message.BlockText {
-			textParts = append(textParts, b.Text)
-		} else {
-			nonText = append(nonText, b)
-		}
-	}
-
-	fullText := strings.Join(textParts, "\n")
-	if len(fullText) <= cfg.MaxLength {
+	if len(msg.TextContent()) <= cfg.MaxLength {
 		return []message.OutboundMessage{msg}
 	}
 
-	chunks := splitText(fullText, cfg)
-
 	var result []message.OutboundMessage
-	for i, chunk := range chunks {
-		out := message.OutboundMessage{
-			Channel:   msg.Channel,
-			Chat:      msg.Chat,
-			ThreadID:  msg.ThreadID,
-			ReplyToID: msg.ReplyToID,
-			Hints:     msg.Hints,
-		}
+	current := newChunkMessage(msg)
+	currentTextLen := 0
+	hasText := false
 
-		var blocks []message.ContentBlock
-		// Attach non-text blocks to the first chunk only.
-		if i == 0 {
-			blocks = append(blocks, nonText...)
+	flush := func() {
+		if len(current.Blocks) == 0 {
+			return
 		}
-		blocks = append(blocks, message.NewTextBlock(chunk))
-		out.Blocks = blocks
-
-		result = append(result, out)
+		result = append(result, current)
+		current = newChunkMessage(msg)
+		currentTextLen = 0
+		hasText = false
 	}
 
+	for _, block := range msg.Blocks {
+		if block.Type != message.BlockText {
+			current.Blocks = append(current.Blocks, block)
+			continue
+		}
+
+		parts := splitText(block.Text, cfg)
+		for _, part := range parts {
+			added := len(part)
+			if hasText {
+				// TextContent() joins text blocks with '\n'.
+				added++
+			}
+
+			if hasText && currentTextLen+added > cfg.MaxLength {
+				flush()
+				added = len(part)
+			}
+
+			current.Blocks = append(current.Blocks, message.NewTextBlock(part))
+			if hasText {
+				currentTextLen++
+			}
+			currentTextLen += len(part)
+			hasText = true
+		}
+	}
+
+	flush()
+	if len(result) == 0 {
+		return []message.OutboundMessage{msg}
+	}
 	return result
+}
+
+func newChunkMessage(msg message.OutboundMessage) message.OutboundMessage {
+	return message.OutboundMessage{
+		Channel:   msg.Channel,
+		Chat:      msg.Chat,
+		ThreadID:  msg.ThreadID,
+		ReplyToID: msg.ReplyToID,
+		Hints:     msg.Hints,
+	}
 }
 
 // splitText breaks text into chunks respecting MaxLength and optionally

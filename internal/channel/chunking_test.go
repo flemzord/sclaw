@@ -128,6 +128,35 @@ func TestSplitMessage_NonTextBlocksInFirstChunk(t *testing.T) {
 	}
 }
 
+func TestSplitMessage_PreservesBlockOrderWhenChunking(t *testing.T) {
+	t.Parallel()
+
+	msg := message.OutboundMessage{
+		Channel: "test",
+		Chat:    message.Chat{ID: "chat-1"},
+		Blocks: []message.ContentBlock{
+			message.NewTextBlock(strings.Repeat("a", 70)),
+			message.NewImageBlock("https://example.com/img.png", "image/png"),
+			message.NewTextBlock(strings.Repeat("b", 70)),
+		},
+	}
+
+	result := SplitMessage(msg, ChunkConfig{MaxLength: 80})
+	if len(result) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(result))
+	}
+
+	if len(result[0].Blocks) < 2 {
+		t.Fatalf("first chunk should have at least 2 blocks, got %d", len(result[0].Blocks))
+	}
+	if result[0].Blocks[0].Type != message.BlockText {
+		t.Fatalf("first chunk first block type = %q, want %q", result[0].Blocks[0].Type, message.BlockText)
+	}
+	if result[0].Blocks[1].Type != message.BlockImage {
+		t.Fatalf("first chunk second block type = %q, want %q", result[0].Blocks[1].Type, message.BlockImage)
+	}
+}
+
 func TestSplitMessage_PreservesMetadata(t *testing.T) {
 	t.Parallel()
 	msg := message.OutboundMessage{

@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -18,6 +19,27 @@ func TestApprovalManager_RegisterResolve(t *testing.T) {
 
 	am.Register("approval-1", pending, key)
 
+	type beginResult struct {
+		resp tool.ApprovalResponse
+		err  error
+	}
+	done := make(chan beginResult, 1)
+	go func() {
+		resp, err := pending.Begin(context.Background(), nil, tool.ApprovalRequest{
+			ID:       "approval-1",
+			ToolName: "read_file",
+		}, time.Second)
+		done <- beginResult{resp: resp, err: err}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for pending.State() != tool.StatePending {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for pending approval state")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	// Resolve the approval.
 	resp := tool.ApprovalResponse{Approved: true, Reason: "looks good"}
 	ok := am.Resolve("approval-1", resp)
@@ -25,17 +47,20 @@ func TestApprovalManager_RegisterResolve(t *testing.T) {
 		t.Fatal("expected Resolve to return true for registered approval")
 	}
 
-	// Verify the response was sent to the channel.
+	// Verify the pending flow received the response.
 	select {
-	case got := <-pending.ResponseChan:
-		if got.Approved != true {
-			t.Errorf("Approved = %v, want true", got.Approved)
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("pending begin returned error: %v", got.err)
 		}
-		if got.Reason != "looks good" {
-			t.Errorf("Reason = %q, want %q", got.Reason, "looks good")
+		if got.resp.Approved != true {
+			t.Errorf("Approved = %v, want true", got.resp.Approved)
+		}
+		if got.resp.Reason != "looks good" {
+			t.Errorf("Reason = %q, want %q", got.resp.Reason, "looks good")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for approval response on channel")
+		t.Fatal("timed out waiting for approval response")
 	}
 }
 
@@ -60,6 +85,27 @@ func TestApprovalManager_DoubleResolve(t *testing.T) {
 
 	am.Register("approval-1", pending, key)
 
+	type beginResult struct {
+		resp tool.ApprovalResponse
+		err  error
+	}
+	done := make(chan beginResult, 1)
+	go func() {
+		resp, err := pending.Begin(context.Background(), nil, tool.ApprovalRequest{
+			ID:       "approval-1",
+			ToolName: "read_file",
+		}, time.Second)
+		done <- beginResult{resp: resp, err: err}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for pending.State() != tool.StatePending {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for pending approval state")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	// First resolve succeeds.
 	ok := am.Resolve("approval-1", tool.ApprovalResponse{Approved: true})
 	if !ok {
@@ -70,6 +116,15 @@ func TestApprovalManager_DoubleResolve(t *testing.T) {
 	ok = am.Resolve("approval-1", tool.ApprovalResponse{Approved: false})
 	if ok {
 		t.Error("expected second Resolve to return false (already resolved)")
+	}
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("pending begin returned error: %v", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for pending approval result")
 	}
 }
 

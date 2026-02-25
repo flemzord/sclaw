@@ -79,30 +79,40 @@ func (a *ContextAssembler) Assemble(ctx context.Context, req AssemblyRequest) (A
 	}
 
 	// Build system prompt from parts.
-	systemPrompt := strings.Join(req.SystemParts, "\n\n")
+	baseSystemPrompt := strings.Join(req.SystemParts, "\n\n")
+	systemPrompt := baseSystemPrompt
 	// Append memory facts to the system prompt, respecting MaxMemoryFacts.
 	facts := req.MemoryFacts
 	if a.config.MaxMemoryFacts > 0 && len(facts) > a.config.MaxMemoryFacts {
 		facts = facts[:a.config.MaxMemoryFacts]
 	}
+	memoryTokens := 0
+	if len(facts) > 0 {
+		facts, memoryTokens = a.limitMemoryFactsByTokens(facts, a.config.MaxMemoryTokens)
+	}
 	if len(facts) > 0 {
 		memorySection := formatMemoryFacts(facts)
-		systemPrompt = systemPrompt + "\n\n" + memorySection
+		if systemPrompt == "" {
+			systemPrompt = memorySection
+		} else {
+			systemPrompt = systemPrompt + "\n\n" + memorySection
+		}
 	}
 
 	// Compute fixed costs.
-	systemTokens := a.estimator.Estimate(systemPrompt)
+	systemTokens := a.estimator.Estimate(baseSystemPrompt)
 	toolTokens := EstimateToolDefinitions(a.estimator, req.Tools)
 
 	budget := ContextBudget{
 		WindowSize: windowSize,
 		System:     systemTokens,
 		Tools:      toolTokens,
+		Memory:     memoryTokens,
 		Reserved:   a.config.ReservedForReply,
 	}
 
 	// Compute available tokens for history.
-	historyBudget := windowSize - systemTokens - toolTokens - a.config.ReservedForReply
+	historyBudget := windowSize - systemTokens - memoryTokens - toolTokens - a.config.ReservedForReply
 	if historyBudget < 0 {
 		historyBudget = 0
 	}
@@ -132,6 +142,34 @@ func (a *ContextAssembler) Assemble(ctx context.Context, req AssemblyRequest) (A
 		Budget:       budget,
 		Compacted:    compacted,
 	}, nil
+}
+
+func (a *ContextAssembler) limitMemoryFactsByTokens(facts []string, maxTokens int) ([]string, int) {
+	if len(facts) == 0 {
+		return nil, 0
+	}
+
+	// maxTokens <= 0 means "no explicit limit".
+	if maxTokens <= 0 {
+		formatted := formatMemoryFacts(facts)
+		return facts, a.estimator.Estimate(formatted)
+	}
+
+	var kept []string
+	for _, fact := range facts {
+		candidate := append(kept, fact)
+		formatted := formatMemoryFacts(candidate)
+		if a.estimator.Estimate(formatted) > maxTokens {
+			break
+		}
+		kept = candidate
+	}
+
+	if len(kept) == 0 {
+		return nil, 0
+	}
+	formatted := formatMemoryFacts(kept)
+	return kept, a.estimator.Estimate(formatted)
 }
 
 // trimHistory removes the oldest messages (preserving the most recent)

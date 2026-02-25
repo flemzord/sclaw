@@ -185,6 +185,41 @@ func TestContextAssembler_Assemble_MaxMemoryFacts(t *testing.T) {
 	}
 }
 
+func TestContextAssembler_Assemble_MaxMemoryTokens(t *testing.T) {
+	t.Parallel()
+
+	estimator := ctxengine.NewCharEstimator(4.0)
+	cfg := ctxengine.ContextConfig{
+		MaxContextTokens: 10000,
+		MaxMemoryTokens:  9,
+	}
+	assembler := ctxengine.NewContextAssembler(estimator, cfg)
+
+	req := ctxengine.AssemblyRequest{
+		SystemParts: []string{"System"},
+		History:     makeTestMessages(1),
+		MemoryFacts: []string{"fact-1", "fact-2"},
+	}
+
+	result, err := assembler.Assemble(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result.SystemPrompt, "fact-1") {
+		t.Fatalf("expected SystemPrompt to include %q, got %q", "fact-1", result.SystemPrompt)
+	}
+	if strings.Contains(result.SystemPrompt, "fact-2") {
+		t.Fatalf("expected SystemPrompt to exclude %q due to MaxMemoryTokens, got %q", "fact-2", result.SystemPrompt)
+	}
+	if result.Budget.Memory <= 0 {
+		t.Fatalf("Budget.Memory = %d, want > 0", result.Budget.Memory)
+	}
+	if result.Budget.Memory > 9 {
+		t.Fatalf("Budget.Memory = %d, want <= 9", result.Budget.Memory)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Assembly with compaction (mock summarizer)
 // ---------------------------------------------------------------------------

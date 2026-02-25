@@ -3,10 +3,13 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/flemzord/sclaw/internal/provider"
 )
+
+var factIDCounter atomic.Uint64
 
 // FactExtractor analyzes exchanges to extract facts for long-term memory.
 // It uses an LLM provider (via the Summarizer-like interface) to identify
@@ -76,13 +79,18 @@ func parseExtractedFacts(response string, _ Exchange) []Fact {
 		}
 
 		facts = append(facts, Fact{
-			ID:        fmt.Sprintf("%s-%d", now.Format("20060102T150405"), i),
+			ID:        nextFactID(now, i),
 			Content:   line,
 			CreatedAt: now,
 		})
 	}
 
 	return facts
+}
+
+func nextFactID(now time.Time, index int) string {
+	seq := factIDCounter.Add(1)
+	return fmt.Sprintf("%d-%d-%d", now.UnixNano(), index, seq)
 }
 
 // splitLines splits text by newlines, trimming whitespace.
