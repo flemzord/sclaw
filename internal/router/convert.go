@@ -2,8 +2,10 @@ package router
 
 import (
 	"context"
+	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -33,4 +35,29 @@ func buildOutbound(original message.InboundMessage, resp agent.Response) message
 	out.ThreadID = original.ThreadID
 	out.ReplyToID = original.ID
 	return out
+}
+
+// sessionViewAdapter wraps a *Session to implement hook.SessionView.
+// This breaks the router→hook circular dependency by providing read-only
+// session access without exposing the full Session struct.
+type sessionViewAdapter struct{ s *Session }
+
+// Compile-time interface check.
+var _ hook.SessionView = (*sessionViewAdapter)(nil)
+
+func (a *sessionViewAdapter) SessionID() string { return a.s.ID }
+
+func (a *sessionViewAdapter) SessionKey() (string, string, string) {
+	return a.s.Key.Channel, a.s.Key.ChatID, a.s.Key.ThreadID
+}
+
+func (a *sessionViewAdapter) AgentID() string      { return a.s.AgentID }
+func (a *sessionViewAdapter) CreatedAt() time.Time { return a.s.CreatedAt }
+
+func (a *sessionViewAdapter) GetMetadata(key string) (any, bool) {
+	if a.s.Metadata == nil {
+		return nil, false
+	}
+	v, ok := a.s.Metadata[key]
+	return v, ok
 }

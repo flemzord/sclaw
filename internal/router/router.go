@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -24,6 +25,10 @@ type Config struct {
 	AgentFactory   AgentFactory
 	ResponseSender ResponseSender
 	Logger         *slog.Logger
+
+	// HookPipeline runs hooks at before_process, before_send, and after_send.
+	// Nil → no hooks (backward compatible).
+	HookPipeline *hook.Pipeline
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -87,6 +92,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		ResponseSender:  cfg.ResponseSender,
 		Pruner:          pruner,
 		Logger:          cfg.Logger,
+		HookPipeline:    cfg.HookPipeline,
 	})
 
 	return &Router{

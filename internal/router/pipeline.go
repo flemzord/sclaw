@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/pkg/message"
@@ -42,6 +43,10 @@ type PipelineConfig struct {
 
 	// Skills are the loaded skill definitions (from the workspace skills dir).
 	Skills []workspace.Skill
+
+	// HookPipeline runs hooks at before_process, before_send, and after_send.
+	// Nil → no hooks (all hook steps become no-ops for backward compatibility).
+	HookPipeline *hook.Pipeline
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -103,8 +108,22 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Skipped: true}
 	}
 
-	// Step 5: Hook before-process — placeholder, no-op.
-	// Will be implemented when the hook system is added.
+	// Step 5: Hook before-process — intercept/drop messages.
+	// hookMeta is shared across all 3 hook positions within this execution.
+	hookMeta := make(map[string]any)
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.BeforeProcess,
+			Inbound:  env.Message,
+			Session:  &sessionViewAdapter{s: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		action, _ := p.cfg.HookPipeline.RunBeforeProcess(ctx, hctx)
+		if action == hook.ActionDrop {
+			return PipelineResult{Session: session, Skipped: true}
+		}
+	}
 
 	// Step 6: Lane lock acquire (step 15 releases via defer).
 	p.cfg.LaneLock.Acquire(env.Key)
@@ -143,10 +162,22 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Error: err}
 	}
 
-	// Step 11: Hook before-send — placeholder, no-op.
+	// Step 11: Hook before-send — allow hooks to modify outbound.
+	outbound := buildOutbound(env.Message, resp)
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.BeforeSend,
+			Inbound:  env.Message,
+			Session:  &sessionViewAdapter{s: session},
+			Outbound: &outbound,
+			Response: &resp,
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		_, _ = p.cfg.HookPipeline.RunBeforeSend(ctx, hctx)
+	}
 
 	// Step 12: Send — deliver response via ResponseSender.
-	outbound := buildOutbound(env.Message, resp)
 	if err := p.cfg.ResponseSender.Send(ctx, outbound); err != nil {
 		logger.Error("pipeline: failed to send response", "error", err, "session_id", session.ID)
 		return PipelineResult{Session: session, Response: &resp, Error: err}
@@ -160,7 +191,19 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	session.History = append(session.History, assistantMsg)
 	p.cfg.Store.Touch(env.Key)
 
-	// Step 14: Hook after-send — placeholder, no-op.
+	// Step 14: Hook after-send — fire-and-forget (audit, analytics, etc.).
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.AfterSend,
+			Inbound:  env.Message,
+			Session:  &sessionViewAdapter{s: session},
+			Outbound: &outbound,
+			Response: &resp,
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		p.cfg.HookPipeline.RunAfterSend(ctx, hctx)
+	}
 
 	// Lazy pruning — opportunistically prune stale sessions.
 	if p.cfg.Pruner != nil {
