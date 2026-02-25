@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/flemzord/sclaw/internal/provider"
 )
@@ -49,9 +50,39 @@ func appendToolResults(messages []provider.LLMMessage, records []ToolCallRecord)
 			Role:    provider.MessageRoleTool,
 			Content: rec.Output.Content,
 			ToolID:  rec.ID,
+			IsError: rec.Output.IsError,
 		})
 	}
 	return messages
+}
+
+func appendAssistantMessage(
+	messages []provider.LLMMessage,
+	content string,
+	toolCalls []provider.ToolCall,
+) []provider.LLMMessage {
+	return append(messages, provider.LLMMessage{
+		Role:      provider.MessageRoleAssistant,
+		Content:   content,
+		ToolCalls: toolCalls,
+	})
+}
+
+func emitStreamEvent(ctx context.Context, ch chan<- StreamEvent, event StreamEvent) bool {
+	// Fast path: emit immediately if the buffer/receiver is available.
+	select {
+	case ch <- event:
+		return true
+	default:
+	}
+
+	// Slow path: wait for either a receiver or context cancellation.
+	select {
+	case ch <- event:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // Run executes the ReAct loop synchronously and returns the final response.
@@ -81,16 +112,6 @@ func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
 				Iterations: i,
 				StopReason: stopReason,
 			}, err
-		}
-
-		// Check token budget.
-		if tracker.exceeded() {
-			return Response{
-				ToolCalls:  allToolCalls,
-				TotalUsage: tracker.total(),
-				Iterations: i,
-				StopReason: StopReasonTokenBudget,
-			}, ErrTokenBudgetExceeded
 		}
 
 		// Call provider.
@@ -141,11 +162,8 @@ func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
 			}
 		}
 
-		// Append assistant message with the content (may be empty).
-		messages = append(messages, provider.LLMMessage{
-			Role:    provider.MessageRoleAssistant,
-			Content: resp.Content,
-		})
+		// Append assistant message with content and tool calls.
+		messages = appendAssistantMessage(messages, resp.Content, resp.ToolCalls)
 
 		// Execute tools in parallel.
 		records := l.executor.Execute(ctx, resp.ToolCalls)
@@ -168,6 +186,9 @@ func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
 //
 // A context.WithTimeout is applied using l.config.Timeout. If the caller's
 // context already carries a shorter deadline, the shorter one takes effect.
+//
+// The caller should either drain the returned channel until close or cancel
+// the context; otherwise the producer goroutine may block on sends.
 func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, error) {
 	ch := make(chan StreamEvent, 16)
 
@@ -180,15 +201,17 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 		detector := newLoopDetector(l.config.LoopThreshold)
 		tracker := newTokenTracker(l.config.TokenBudget)
 		messages := buildInitialMessages(req)
+		var allToolCalls []ToolCallRecord
 
 		for i := 0; i < l.config.MaxIterations; i++ {
 			if err := ctx.Err(); err != nil {
-				ch <- StreamEvent{Type: StreamEventError, Err: err}
-				return
-			}
-
-			if tracker.exceeded() {
-				ch <- StreamEvent{Type: StreamEventError, Err: ErrTokenBudgetExceeded}
+				// Best-effort emit: context is already cancelled so the
+				// select on ctx.Done inside emitStreamEvent would fail if
+				// the buffer is full. Use a non-blocking send instead.
+				select {
+				case ch <- StreamEvent{Type: StreamEventError, Err: err}:
+				default:
+				}
 				return
 			}
 
@@ -197,12 +220,12 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 				Tools:    req.Tools,
 			})
 			if err != nil {
-				ch <- StreamEvent{Type: StreamEventError, Err: err}
+				emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventError, Err: err})
 				return
 			}
 
 			// Consume stream, forwarding text chunks and accumulating tool calls.
-			var content string
+			var content strings.Builder
 			var toolCalls []provider.ToolCall
 			var usage *provider.TokenUsage
 
@@ -213,8 +236,10 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 					break
 				}
 				if chunk.Content != "" {
-					content += chunk.Content
-					ch <- StreamEvent{Type: StreamEventText, Content: chunk.Content}
+					content.WriteString(chunk.Content)
+					if !emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventText, Content: chunk.Content}) {
+						return
+					}
 				}
 				if len(chunk.ToolCalls) > 0 {
 					toolCalls = append(toolCalls, chunk.ToolCalls...)
@@ -229,22 +254,32 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 				//nolint:revive // intentional empty drain loop
 				for range streamCh { //nolint:revive
 				}
-				ch <- StreamEvent{Type: StreamEventError, Err: streamErr}
+				emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventError, Err: streamErr})
 				return
 			}
 
 			if usage != nil {
 				tracker.add(*usage)
-				ch <- StreamEvent{Type: StreamEventUsage, Usage: usage}
-				if tracker.exceeded() {
-					ch <- StreamEvent{Type: StreamEventError, Err: ErrTokenBudgetExceeded}
+				if !emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventUsage, Usage: usage}) {
 					return
 				}
 			}
 
+			if tracker.exceeded() {
+				emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventError, Err: ErrTokenBudgetExceeded})
+				return
+			}
+
 			// No tool calls → done.
 			if len(toolCalls) == 0 {
-				ch <- StreamEvent{Type: StreamEventDone}
+				final := Response{
+					Content:    content.String(),
+					ToolCalls:  allToolCalls,
+					TotalUsage: tracker.total(),
+					Iterations: i + 1,
+					StopReason: StopReasonComplete,
+				}
+				emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventDone, Final: &final})
 				return
 			}
 
@@ -252,30 +287,32 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 			// leaving an orphan assistant message without tool results.
 			for _, tc := range toolCalls {
 				if detector.record(tc.Name, tc.Arguments) {
-					ch <- StreamEvent{Type: StreamEventError, Err: ErrLoopDetected}
+					emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventError, Err: ErrLoopDetected})
 					return
 				}
 			}
 
-			messages = append(messages, provider.LLMMessage{
-				Role:    provider.MessageRoleAssistant,
-				Content: content,
-			})
+			messages = appendAssistantMessage(messages, content.String(), toolCalls)
 
 			// Signal tool starts.
 			for _, tc := range toolCalls {
-				ch <- StreamEvent{
+				if !emitStreamEvent(ctx, ch, StreamEvent{
 					Type:     StreamEventToolStart,
 					ToolCall: &ToolCallRecord{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments},
+				}) {
+					return
 				}
 			}
 
 			records := l.executor.Execute(ctx, toolCalls)
+			allToolCalls = append(allToolCalls, records...)
 
 			for idx := range records {
-				ch <- StreamEvent{
+				if !emitStreamEvent(ctx, ch, StreamEvent{
 					Type:     StreamEventToolEnd,
 					ToolCall: &records[idx],
+				}) {
+					return
 				}
 			}
 
@@ -283,7 +320,7 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 			messages = appendToolResults(messages, records)
 		}
 
-		ch <- StreamEvent{Type: StreamEventError, Err: ErrMaxIterationsReached}
+		emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventError, Err: ErrMaxIterationsReached})
 	}()
 
 	return ch, nil

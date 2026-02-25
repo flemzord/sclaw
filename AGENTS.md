@@ -37,8 +37,8 @@ direnv allow    # Loads shell.nix automatically
 Commands are available directly in the Nix shell:
 
 ```bash
-lint    # Run golangci-lint
-test    # Run tests with race detector + coverage
+lint       # Run golangci-lint
+run-tests  # Run tests with race detector + coverage
 ```
 
 ## Code Conventions

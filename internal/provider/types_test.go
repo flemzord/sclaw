@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -9,9 +10,13 @@ func TestLLMMessageJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	msg := LLMMessage{
-		Role:    MessageRoleUser,
+		Role:    MessageRoleAssistant,
 		Content: "hello",
 		Name:    "alice",
+		ToolCalls: []ToolCall{
+			{ID: "tc1", Name: "search", Arguments: json.RawMessage(`{"query":"hello"}`)},
+		},
+		IsError: true,
 	}
 
 	data, err := json.Marshal(msg)
@@ -24,7 +29,7 @@ func TestLLMMessageJSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if got != msg {
+	if !reflect.DeepEqual(got, msg) {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", got, msg)
 	}
 }
@@ -48,6 +53,12 @@ func TestLLMMessageOmitempty(t *testing.T) {
 	}
 	if _, ok := raw["tool_id"]; ok {
 		t.Error("expected tool_id to be omitted when empty")
+	}
+	if _, ok := raw["tool_calls"]; ok {
+		t.Error("expected tool_calls to be omitted when empty")
+	}
+	if _, ok := raw["is_error"]; ok {
+		t.Error("expected is_error to be omitted when false")
 	}
 }
 

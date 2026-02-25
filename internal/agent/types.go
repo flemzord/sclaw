@@ -53,7 +53,9 @@ type StreamEvent struct {
 	Content  string
 	ToolCall *ToolCallRecord
 	Usage    *provider.TokenUsage
-	Err      error
+	// Final is set on StreamEventDone with the aggregated loop response.
+	Final *Response
+	Err   error
 }
 
 // Request is the input to the agent loop.
