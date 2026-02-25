@@ -12,6 +12,10 @@ import (
 	"github.com/flemzord/sclaw/internal/cert"
 )
 
+// goVersion is the Go directive version used in generated go.mod files.
+// Must match the version in the project's go.mod.
+const goVersion = "1.25.0"
+
 // Plugin identifies a third-party Go module to include in the build.
 type Plugin struct {
 	ModulePath string
@@ -41,7 +45,7 @@ type BuildRequest struct {
 }
 
 // Build generates and compiles a custom sclaw binary with the given plugins.
-func Build(req BuildRequest) error {
+func Build(ctx context.Context, req BuildRequest) error {
 	tmpDir, err := os.MkdirTemp("", "xsclaw-build-*")
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
@@ -57,7 +61,7 @@ func Build(req BuildRequest) error {
 	// Verify plugin signatures when a cert verifier is configured.
 	if req.CertVerifier != nil {
 		for _, p := range req.Plugins {
-			if err := req.CertVerifier.Verify(p.ModulePath, p.Signature); err != nil {
+			if err := req.CertVerifier.Verify(p.String(), p.Signature); err != nil {
 				return fmt.Errorf("plugin %s: certification failed: %w", p.ModulePath, err)
 			}
 		}
@@ -82,7 +86,6 @@ func Build(req BuildRequest) error {
 		return fmt.Errorf("creating main.go: %w", err)
 	}
 	if err := GenerateMain(f, CodegenParams{
-		SclawVersion:   "latest",
 		FirstPartyPkgs: firstParty,
 		PluginPkgs:     pluginPkgs,
 	}); err != nil {
@@ -102,7 +105,6 @@ func Build(req BuildRequest) error {
 		return fmt.Errorf("generating go.mod: %w", err)
 	}
 
-	ctx := context.Background()
 	goCmd := req.GoPath
 
 	// go mod tidy.
@@ -136,7 +138,7 @@ func Build(req BuildRequest) error {
 func generateGoMod(dir string, plugins []Plugin, sclawVersion string) error {
 	var b strings.Builder
 	b.WriteString("module sclaw-custom\n\n")
-	b.WriteString("go 1.25.0\n\n")
+	fmt.Fprintf(&b, "go %s\n\n", goVersion)
 	b.WriteString("require (\n")
 	fmt.Fprintf(&b, "\tgithub.com/flemzord/sclaw %s\n", sclawVersion)
 	for _, p := range plugins {
@@ -150,26 +152,32 @@ func generateGoMod(dir string, plugins []Plugin, sclawVersion string) error {
 }
 
 // parsePlugins converts "module@version" strings into Plugin structs.
-func parsePlugins(raw []string) []Plugin {
+// Returns an error if any entry is empty or malformed.
+func parsePlugins(raw []string) ([]Plugin, error) {
 	plugins := make([]Plugin, len(raw))
 	for i, s := range raw {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil, fmt.Errorf("plugin entry %d is empty", i)
+		}
 		if idx := strings.LastIndex(s, "@"); idx > 0 {
 			plugins[i] = Plugin{ModulePath: s[:idx], Version: s[idx+1:]}
 		} else {
 			plugins[i] = Plugin{ModulePath: s}
 		}
 	}
-	return plugins
+	return plugins, nil
 }
 
-// filterModules returns only modules whose import paths contain one of the
-// given IDs. This is a simple contains check to allow --only to work with
-// partial module IDs.
+// filterModules returns only modules whose last path segment matches one of the
+// given IDs. Uses suffix matching on path segments to avoid false positives
+// (e.g. "log" won't match "catalog").
 func filterModules(all []string, onlyIDs []string) []string {
 	var result []string
 	for _, mod := range all {
 		for _, id := range onlyIDs {
-			if strings.Contains(mod, id) {
+			// Match by last path segment or exact suffix after "/".
+			if mod == id || strings.HasSuffix(mod, "/"+id) {
 				result = append(result, mod)
 				break
 			}

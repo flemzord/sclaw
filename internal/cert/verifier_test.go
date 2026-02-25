@@ -4,8 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -15,7 +13,7 @@ func TestNewVerifier_NotRequired(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Should accept anything when not required.
-	if err := v.Verify("/any/path", nil); err != nil {
+	if err := v.Verify("github.com/any/module@v1.0.0", nil); err != nil {
 		t.Errorf("expected nil error, got: %v", err)
 	}
 }
@@ -50,16 +48,8 @@ func TestNewVerifier_InvalidKeySize(t *testing.T) {
 func TestVerifier_ValidSignature(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plugin.so")
-	if err := os.WriteFile(path, []byte("plugin content"), 0o644); err != nil {
-		t.Fatalf("writing file: %v", err)
-	}
-
-	sig, err := Sign(priv, path)
-	if err != nil {
-		t.Fatalf("signing: %v", err)
-	}
+	identity := "github.com/example/plugin@v1.0.0"
+	sig := Sign(priv, identity)
 
 	v, err := NewVerifier(VerifyConfig{
 		RequireCertified: true,
@@ -69,20 +59,30 @@ func TestVerifier_ValidSignature(t *testing.T) {
 		t.Fatalf("creating verifier: %v", err)
 	}
 
-	if err := v.Verify(path, sig); err != nil {
+	if err := v.Verify(identity, sig); err != nil {
 		t.Errorf("valid signature rejected: %v", err)
+	}
+}
+
+func TestVerifier_MissingSignature(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+
+	v, err := NewVerifier(VerifyConfig{
+		RequireCertified: true,
+		TrustedKeys:      []string{hex.EncodeToString(pub)},
+	})
+	if err != nil {
+		t.Fatalf("creating verifier: %v", err)
+	}
+
+	if err := v.Verify("github.com/example/plugin@v1.0.0", nil); err == nil {
+		t.Error("expected error for missing signature")
 	}
 }
 
 func TestVerifier_InvalidSignature(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plugin.so")
-	if err := os.WriteFile(path, []byte("plugin content"), 0o644); err != nil {
-		t.Fatalf("writing file: %v", err)
-	}
-
 	v, err := NewVerifier(VerifyConfig{
 		RequireCertified: true,
 		TrustedKeys:      []string{hex.EncodeToString(pub)},
@@ -91,24 +91,17 @@ func TestVerifier_InvalidSignature(t *testing.T) {
 		t.Fatalf("creating verifier: %v", err)
 	}
 
-	// Use garbage signature.
-	if err := v.Verify(path, []byte("bad-signature")); err == nil {
+	if err := v.Verify("github.com/example/plugin@v1.0.0", []byte("bad-signature")); err == nil {
 		t.Error("expected error for invalid signature")
 	}
 }
 
 func TestVerifier_UntrustedKey(t *testing.T) {
-	// Sign with key A, verify with key B.
 	_, privA, _ := ed25519.GenerateKey(rand.Reader)
 	pubB, _, _ := ed25519.GenerateKey(rand.Reader)
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plugin.so")
-	if err := os.WriteFile(path, []byte("plugin content"), 0o644); err != nil {
-		t.Fatalf("writing file: %v", err)
-	}
-
-	sig, _ := Sign(privA, path)
+	identity := "github.com/example/plugin@v1.0.0"
+	sig := Sign(privA, identity)
 
 	v, err := NewVerifier(VerifyConfig{
 		RequireCertified: true,
@@ -118,7 +111,7 @@ func TestVerifier_UntrustedKey(t *testing.T) {
 		t.Fatalf("creating verifier: %v", err)
 	}
 
-	if err := v.Verify(path, sig); err == nil {
+	if err := v.Verify(identity, sig); err == nil {
 		t.Error("expected error for untrusted key")
 	}
 }

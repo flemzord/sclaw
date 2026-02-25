@@ -14,7 +14,10 @@ func TestParsePlugins(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		plugins := parsePlugins([]string{tt.input})
+		plugins, err := parsePlugins([]string{tt.input})
+		if err != nil {
+			t.Fatalf("parsePlugins(%q) error: %v", tt.input, err)
+		}
 		if len(plugins) != 1 {
 			t.Fatalf("expected 1 plugin, got %d", len(plugins))
 		}
@@ -25,6 +28,23 @@ func TestParsePlugins(t *testing.T) {
 		if p.Version != tt.wantVer {
 			t.Errorf("parsePlugins(%q).Version = %q, want %q", tt.input, p.Version, tt.wantVer)
 		}
+	}
+}
+
+func TestParsePlugins_EmptyEntry(t *testing.T) {
+	_, err := parsePlugins([]string{"github.com/a/b", ""})
+	if err == nil {
+		t.Error("expected error for empty plugin entry")
+	}
+}
+
+func TestParsePlugins_Whitespace(t *testing.T) {
+	plugins, err := parsePlugins([]string{"  github.com/a/b@v1.0.0  "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plugins[0].ModulePath != "github.com/a/b" {
+		t.Errorf("got module %q, want trimmed path", plugins[0].ModulePath)
 	}
 }
 
@@ -41,6 +61,18 @@ func TestFilterModules(t *testing.T) {
 	}
 	if got[0] != all[0] {
 		t.Errorf("got %q, want %q", got[0], all[0])
+	}
+}
+
+func TestFilterModules_NoFalsePositive(t *testing.T) {
+	all := []string{
+		"github.com/flemzord/sclaw/internal/channel/catalog",
+		"github.com/flemzord/sclaw/internal/channel/dialog",
+	}
+	// "log" should NOT match "catalog" or "dialog" with suffix matching.
+	got := filterModules(all, []string{"log"})
+	if len(got) != 0 {
+		t.Errorf("expected empty (no false positives), got %v", got)
 	}
 }
 

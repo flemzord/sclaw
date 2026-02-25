@@ -40,7 +40,6 @@ const (
 type Event struct {
 	Type       EventType
 	ConfigPath string
-	Err        error
 }
 
 // Watcher polls a configuration file for modifications.
@@ -80,6 +79,11 @@ func (w *Watcher) Events() <-chan Event {
 }
 
 // Stop stops the watcher. Safe to call multiple times and before Start.
+//
+// Note: if Stop races with Start (called after startOnce.Do sets started=true
+// but before the goroutine begins executing), Stop blocks on <-w.stopped until
+// the goroutine starts, sees the closed stop channel, and exits. This is safe
+// because the goroutine is guaranteed to be scheduled eventually.
 func (w *Watcher) Stop() {
 	w.stopOnce.Do(func() {
 		close(w.stop)

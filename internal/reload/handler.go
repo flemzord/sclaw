@@ -34,14 +34,22 @@ func (h *Handler) HandleReload(ctx context.Context, configPath string) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	return h.HandleReloadFromConfig(ctx, cfg)
-}
-
-// HandleReloadFromConfig validates a pre-loaded config and calls Reload on
-// all modules that implement core.Reloader.
-func (h *Handler) HandleReloadFromConfig(_ context.Context, cfg *config.Config) error {
 	if err := config.Validate(cfg); err != nil {
 		return fmt.Errorf("validating config: %w", err)
+	}
+	return h.handleReload(ctx, cfg)
+}
+
+// HandleReloadFromConfig reloads modules from a pre-loaded, already-validated
+// config. The caller is responsible for calling config.Validate before this
+// method — it will not re-validate.
+func (h *Handler) HandleReloadFromConfig(ctx context.Context, cfg *config.Config) error {
+	return h.handleReload(ctx, cfg)
+}
+
+func (h *Handler) handleReload(ctx context.Context, cfg *config.Config) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before reload: %w", err)
 	}
 
 	appCtx := core.NewAppContext(h.logger, h.dataDir, h.workspace)

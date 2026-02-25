@@ -8,9 +8,7 @@ import (
 
 func TestGenerateMain_NoPlugins(t *testing.T) {
 	var buf bytes.Buffer
-	err := GenerateMain(&buf, CodegenParams{
-		SclawVersion: "v0.1.0",
-	})
+	err := GenerateMain(&buf, CodegenParams{})
 	if err != nil {
 		t.Fatalf("GenerateMain error: %v", err)
 	}
@@ -31,8 +29,7 @@ func TestGenerateMain_NoPlugins(t *testing.T) {
 func TestGenerateMain_WithPlugins(t *testing.T) {
 	var buf bytes.Buffer
 	err := GenerateMain(&buf, CodegenParams{
-		SclawVersion: "v0.1.0",
-		PluginPkgs:   []string{"github.com/example/plugin"},
+		PluginPkgs: []string{"github.com/example/plugin"},
 	})
 	if err != nil {
 		t.Fatalf("GenerateMain error: %v", err)
@@ -47,7 +44,6 @@ func TestGenerateMain_WithPlugins(t *testing.T) {
 func TestGenerateMain_WithFirstParty(t *testing.T) {
 	var buf bytes.Buffer
 	err := GenerateMain(&buf, CodegenParams{
-		SclawVersion:   "v0.1.0",
 		FirstPartyPkgs: []string{"github.com/flemzord/sclaw/internal/channel/telegram"},
 	})
 	if err != nil {
@@ -61,12 +57,8 @@ func TestGenerateMain_WithFirstParty(t *testing.T) {
 }
 
 func TestGenerateMain_WithOnly(t *testing.T) {
-	// When --only is used, only the specified first-party modules are included.
-	// This is handled by filterModules in build.go, not in codegen itself.
-	// Codegen just emits whatever is passed to it.
 	var buf bytes.Buffer
 	err := GenerateMain(&buf, CodegenParams{
-		SclawVersion:   "v0.1.0",
 		FirstPartyPkgs: []string{"github.com/flemzord/sclaw/internal/channel/telegram"},
 		PluginPkgs:     []string{"github.com/example/custom"},
 	})

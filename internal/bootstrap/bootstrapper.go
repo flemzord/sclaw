@@ -45,7 +45,8 @@ func (b *Bootstrapper) NeedsRebuild(desiredPlugins []string) bool {
 }
 
 // Rebuild invokes xsclaw build to produce a new binary containing the given
-// plugins. It returns the path to the newly built binary.
+// plugins. On success, it atomically replaces the current binary so that
+// service restarts pick up the new version. Returns the path to the binary.
 func (b *Bootstrapper) Rebuild(ctx context.Context, plugins []string) (string, error) {
 	output := b.binaryPath + ".new"
 
@@ -64,7 +65,12 @@ func (b *Bootstrapper) Rebuild(ctx context.Context, plugins []string) (string, e
 		return "", fmt.Errorf("xsclaw build failed: %w", err)
 	}
 
-	return output, nil
+	// Replace the original binary so that service restarts use the new version.
+	if err := os.Rename(output, b.binaryPath); err != nil {
+		return "", fmt.Errorf("replacing binary: %w", err)
+	}
+
+	return b.binaryPath, nil
 }
 
 // ReExec replaces the current process with the binary at binaryPath.

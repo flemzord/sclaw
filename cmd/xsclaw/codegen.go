@@ -7,9 +7,6 @@ import (
 
 // CodegenParams controls the generated main.go template.
 type CodegenParams struct {
-	// SclawVersion is the sclaw module version for the go.mod require.
-	SclawVersion string
-
 	// FirstPartyPkgs is the list of first-party module import paths to include
 	// via blank imports.
 	FirstPartyPkgs []string

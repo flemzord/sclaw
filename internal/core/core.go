@@ -132,6 +132,10 @@ func (a *App) ReloadModules(ctx *AppContext) error {
 }
 
 // Run starts all modules and blocks until a shutdown signal is received.
+//
+// Deprecated: Use pkg/app.Run() for production usage. It adds hot config
+// reload (SIGHUP + file polling) and plugin bootstrapping. This method is
+// retained for simple/test scenarios that do not need reload support.
 func (a *App) Run() error {
 	if err := a.Start(); err != nil {
 		return err

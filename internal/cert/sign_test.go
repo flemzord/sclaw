@@ -3,8 +3,6 @@ package cert
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -14,36 +12,22 @@ func TestSign_Roundtrip(t *testing.T) {
 		t.Fatalf("generating key: %v", err)
 	}
 
-	// Write a temp file to sign.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plugin.so")
-	if err := os.WriteFile(path, []byte("plugin binary content"), 0o644); err != nil {
-		t.Fatalf("writing temp file: %v", err)
-	}
+	identity := "github.com/example/plugin@v1.0.0"
+	sig := Sign(priv, identity)
 
-	sig, err := Sign(priv, path)
-	if err != nil {
-		t.Fatalf("signing: %v", err)
-	}
-
-	if !ed25519.Verify(pub, mustDigest(t, path), sig) {
+	digest := identityDigest(identity)
+	if !ed25519.Verify(pub, digest, sig) {
 		t.Error("signature verification failed with correct key")
 	}
 }
 
-func TestSign_FileNotFound(t *testing.T) {
+func TestSign_DifferentIdentities(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	_, err := Sign(priv, "/nonexistent/path")
-	if err == nil {
-		t.Error("expected error for missing file")
-	}
-}
 
-func mustDigest(t *testing.T, path string) []byte {
-	t.Helper()
-	d, err := fileDigest(path)
-	if err != nil {
-		t.Fatalf("computing digest: %v", err)
+	sig1 := Sign(priv, "github.com/a/b@v1.0.0")
+	sig2 := Sign(priv, "github.com/a/b@v2.0.0")
+
+	if string(sig1) == string(sig2) {
+		t.Error("different identities should produce different signatures")
 	}
-	return d
 }

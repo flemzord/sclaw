@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/flemzord/sclaw/internal/config"
 )
 
 func TestResolveConfigPath_XDGConfigHome(t *testing.T) {
@@ -31,7 +33,6 @@ func TestResolveConfigPath_XDGConfigHome(t *testing.T) {
 func TestResolveConfigPath_NotFound(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/nonexistent/path")
 
-	// Also ensure there's no sclaw.yaml in the current directory.
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
 	if err := os.Chdir(tmpDir); err != nil {
@@ -55,12 +56,14 @@ func TestDefaultDataDir_XDGDataHome(t *testing.T) {
 }
 
 func TestDefaultDataDir_Fallback(t *testing.T) {
+	// t.Setenv records the original value for cleanup, then Unsetenv
+	// actually removes it so LookupEnv returns ok=false.
 	t.Setenv("XDG_DATA_HOME", "")
 	_ = os.Unsetenv("XDG_DATA_HOME")
 
 	got := DefaultDataDir()
 	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".config", "sclaw", "data")
+	want := filepath.Join(home, ".local", "share", "sclaw")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -104,5 +107,19 @@ func TestRun_ValidationFailure(t *testing.T) {
 	err := Run(RunParams{ConfigPath: path})
 	if err == nil {
 		t.Error("expected validation error")
+	}
+}
+
+func TestPluginModules(t *testing.T) {
+	plugins := []config.PluginEntry{
+		{Module: "github.com/a/b", Version: "v1.0.0"},
+		{Module: "github.com/c/d"},
+	}
+	got := pluginModules(plugins)
+	if got[0] != "github.com/a/b@v1.0.0" {
+		t.Errorf("got %q, want %q", got[0], "github.com/a/b@v1.0.0")
+	}
+	if got[1] != "github.com/c/d" {
+		t.Errorf("got %q, want %q", got[1], "github.com/c/d")
 	}
 }

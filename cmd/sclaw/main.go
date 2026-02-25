@@ -79,11 +79,21 @@ func configCmd() *cobra.Command {
 		Short: "Configuration management",
 	}
 	cmd.AddCommand(&cobra.Command{
-		Use:   "check <path>",
+		Use:   "check [path]",
 		Short: "Validate configuration",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			cfg, err := config.Load(args[0])
+			var cfgPath string
+			if len(args) > 0 {
+				cfgPath = args[0]
+			} else {
+				resolved, err := app.ResolveConfigPath()
+				if err != nil {
+					return err
+				}
+				cfgPath = resolved
+			}
+			cfg, err := config.Load(cfgPath)
 			if err != nil {
 				return err
 			}

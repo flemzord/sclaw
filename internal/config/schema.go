@@ -31,6 +31,14 @@ type PluginEntry struct {
 	Version string `yaml:"version"`
 }
 
+// String returns the module@version representation.
+func (p PluginEntry) String() string {
+	if p.Version != "" {
+		return p.Module + "@" + p.Version
+	}
+	return p.Module
+}
+
 // SecurityConfig holds security-related settings.
 type SecurityConfig struct {
 	Plugins PluginSecurityConfig `yaml:"plugins"`

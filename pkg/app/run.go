@@ -134,11 +134,7 @@ func Run(params RunParams) error {
 				return nil
 			}
 		case evt := <-watcher.Events():
-			if evt.Err != nil {
-				logger.Error("watcher error", "error", evt.Err)
-				continue
-			}
-			logger.Info("config file changed, reloading")
+			logger.Info("config file changed, reloading", "path", evt.ConfigPath)
 			if err := reloadOrRebuild(watchCtx, logger, handler, bs, application, cfgPath); err != nil {
 				logger.Error("reload failed", "error", err)
 			}
@@ -195,11 +191,7 @@ func pluginsChanged(plugins []config.PluginEntry, bs *bootstrap.Bootstrapper) bo
 func pluginModules(plugins []config.PluginEntry) []string {
 	result := make([]string, len(plugins))
 	for i, p := range plugins {
-		if p.Version != "" {
-			result[i] = p.Module + "@" + p.Version
-		} else {
-			result[i] = p.Module
-		}
+		result[i] = p.String()
 	}
 	return result
 }
@@ -227,13 +219,13 @@ func ResolveConfigPath() (string, error) {
 }
 
 // DefaultDataDir returns the default persistent data directory.
-// Uses $XDG_DATA_HOME/sclaw if set, otherwise ~/.config/sclaw/data.
+// Uses $XDG_DATA_HOME/sclaw if set, otherwise ~/.local/share/sclaw per the XDG spec.
 func DefaultDataDir() string {
 	if dir, ok := os.LookupEnv("XDG_DATA_HOME"); ok {
 		return filepath.Join(dir, "sclaw")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "sclaw", "data")
+	return filepath.Join(home, ".local", "share", "sclaw")
 }
 
 // DefaultWorkspace returns the current working directory.
