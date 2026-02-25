@@ -29,6 +29,7 @@ func messageToLLM(msg message.InboundMessage) provider.LLMMessage {
 // buildOutbound creates an outbound text response preserving thread/reply context.
 func buildOutbound(original message.InboundMessage, resp agent.Response) message.OutboundMessage {
 	out := message.NewTextMessage(original.Chat, resp.Content)
+	out.Channel = original.Channel
 	out.ThreadID = original.ThreadID
 	out.ReplyToID = original.ID
 	return out

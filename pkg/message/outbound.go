@@ -2,6 +2,7 @@ package message
 
 // OutboundMessage represents a message to be sent through a channel.
 type OutboundMessage struct {
+	Channel   string         `json:"channel,omitempty"`
 	Chat      Chat           `json:"chat"`
 	ThreadID  string         `json:"thread_id,omitempty"`
 	ReplyToID string         `json:"reply_to_id,omitempty"`
