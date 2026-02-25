@@ -352,7 +352,38 @@ func TestRun_TokenBudget(t *testing.T) {
 	}
 }
 
-// TestRun_Timeout: use a context that's already cancelled → StopReasonTimeout.
+// TestRun_TokenBudget_FinalResponse: budget is exceeded by a final text-only response.
+func TestRun_TokenBudget_FinalResponse(t *testing.T) {
+	t.Parallel()
+
+	p := &mockProvider{
+		responses: []provider.CompletionResponse{
+			{
+				Content:      "too expensive",
+				FinishReason: provider.FinishReasonStop,
+				Usage:        provider.TokenUsage{PromptTokens: 60, CompletionTokens: 90, TotalTokens: 150},
+			},
+		},
+	}
+	executor := newLoopTestExecutor()
+	loop := newTestLoop(p, executor, LoopConfig{MaxIterations: 10, TokenBudget: 100})
+
+	resp, err := loop.Run(context.Background(), Request{
+		Messages: []provider.LLMMessage{userMsg("final response")},
+	})
+
+	if !errors.Is(err, ErrTokenBudgetExceeded) {
+		t.Fatalf("expected ErrTokenBudgetExceeded, got %v", err)
+	}
+	if resp.StopReason != StopReasonTokenBudget {
+		t.Errorf("expected StopReasonTokenBudget, got %s", resp.StopReason)
+	}
+	if resp.Iterations != 1 {
+		t.Errorf("expected 1 iteration, got %d", resp.Iterations)
+	}
+}
+
+// TestRun_Timeout: use a context that's already cancelled → StopReasonError + context.Canceled.
 func TestRun_Timeout(t *testing.T) {
 	t.Parallel()
 
@@ -374,8 +405,11 @@ func TestRun_Timeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for cancelled context")
 	}
-	if resp.StopReason != StopReasonTimeout {
-		t.Errorf("expected StopReasonTimeout, got %s", resp.StopReason)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if resp.StopReason != StopReasonError {
+		t.Errorf("expected StopReasonError, got %s", resp.StopReason)
 	}
 }
 
@@ -631,6 +665,47 @@ func TestRunStream_TokenBudget(t *testing.T) {
 	}
 }
 
+// TestRunStream_TokenBudget_FinalResponse: budget can be exceeded on a final text-only stream.
+func TestRunStream_TokenBudget_FinalResponse(t *testing.T) {
+	t.Parallel()
+
+	p := &mockProvider{
+		streams: [][]provider.StreamChunk{
+			{
+				{Content: "too expensive"},
+				{Usage: &provider.TokenUsage{PromptTokens: 60, CompletionTokens: 90, TotalTokens: 150}},
+				{FinishReason: provider.FinishReasonStop},
+			},
+		},
+	}
+	executor := newLoopTestExecutor()
+	loop := newTestLoop(p, executor, LoopConfig{MaxIterations: 10, TokenBudget: 100})
+
+	ch, err := loop.RunStream(context.Background(), Request{
+		Messages: []provider.LLMMessage{userMsg("final stream")},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var gotDone bool
+	var gotBudget bool
+	for e := range ch {
+		if e.Type == StreamEventDone {
+			gotDone = true
+		}
+		if e.Type == StreamEventError && errors.Is(e.Err, ErrTokenBudgetExceeded) {
+			gotBudget = true
+		}
+	}
+	if !gotBudget {
+		t.Error("expected StreamEventError with ErrTokenBudgetExceeded")
+	}
+	if gotDone {
+		t.Error("did not expect StreamEventDone when budget is exceeded")
+	}
+}
+
 // TestRunStream_LoopDetection: streaming with loop detection guard.
 func TestRunStream_LoopDetection(t *testing.T) {
 	t.Parallel()
@@ -699,13 +774,13 @@ func TestRunStream_Timeout(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var gotTimeout bool
+	var gotCanceled bool
 	for e := range ch {
-		if e.Type == StreamEventError {
-			gotTimeout = true
+		if e.Type == StreamEventError && errors.Is(e.Err, context.Canceled) {
+			gotCanceled = true
 		}
 	}
-	if !gotTimeout {
-		t.Error("expected StreamEventError for cancelled context")
+	if !gotCanceled {
+		t.Error("expected StreamEventError with context.Canceled")
 	}
 }

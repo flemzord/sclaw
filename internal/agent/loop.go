@@ -71,12 +71,16 @@ func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
 	for i := 0; i < l.config.MaxIterations; i++ {
 		// Check context cancellation (timeout or external cancel).
 		if err := ctx.Err(); err != nil {
+			stopReason := StopReasonError
+			if errors.Is(err, context.DeadlineExceeded) {
+				stopReason = StopReasonTimeout
+			}
 			return Response{
 				ToolCalls:  allToolCalls,
 				TotalUsage: tracker.total(),
 				Iterations: i,
-				StopReason: StopReasonTimeout,
-			}, context.DeadlineExceeded
+				StopReason: stopReason,
+			}, err
 		}
 
 		// Check token budget.
@@ -104,6 +108,14 @@ func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
 		}
 
 		tracker.add(resp.Usage)
+		if tracker.exceeded() {
+			return Response{
+				ToolCalls:  allToolCalls,
+				TotalUsage: tracker.total(),
+				Iterations: i + 1,
+				StopReason: StopReasonTokenBudget,
+			}, ErrTokenBudgetExceeded
+		}
 
 		// No tool calls → the model is done reasoning.
 		if len(resp.ToolCalls) == 0 {
@@ -170,8 +182,8 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 		messages := buildInitialMessages(req)
 
 		for i := 0; i < l.config.MaxIterations; i++ {
-			if ctx.Err() != nil {
-				ch <- StreamEvent{Type: StreamEventError, Err: context.DeadlineExceeded}
+			if err := ctx.Err(); err != nil {
+				ch <- StreamEvent{Type: StreamEventError, Err: err}
 				return
 			}
 
@@ -224,6 +236,10 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 			if usage != nil {
 				tracker.add(*usage)
 				ch <- StreamEvent{Type: StreamEventUsage, Usage: usage}
+				if tracker.exceeded() {
+					ch <- StreamEvent{Type: StreamEventError, Err: ErrTokenBudgetExceeded}
+					return
+				}
 			}
 
 			// No tool calls → done.
