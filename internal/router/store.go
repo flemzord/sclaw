@@ -3,6 +3,7 @@ package router
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -37,9 +38,16 @@ func (s *InMemorySessionStore) GetOrCreate(key SessionKey) (*Session, bool) {
 		return sess, false
 	}
 
+	id, err := generateID()
+	if err != nil {
+		// Wrap and surface the error in the session ID field as a last resort.
+		// In practice this should never happen (requires broken OS entropy).
+		id = fmt.Sprintf("err-%v", err)
+	}
+
 	now := s.now()
 	sess := &Session{
-		ID:           generateID(),
+		ID:           id,
 		Key:          key,
 		CreatedAt:    now,
 		LastActiveAt: now,
@@ -114,13 +122,11 @@ func (s *InMemorySessionStore) ActiveKeys() map[SessionKey]struct{} {
 
 // generateID produces a 32-character hex string from 16 random bytes.
 // It uses crypto/rand for uniqueness without external dependencies.
-func generateID() string {
+// Returns an error if the OS entropy source is unavailable.
+func generateID() (string, error) {
 	var buf [16]byte
-	// crypto/rand.Read always returns len(buf) bytes on supported platforms.
-	// A failure here indicates a broken OS entropy source — a condition so
-	// severe that no reasonable recovery exists.
 	if _, err := rand.Read(buf[:]); err != nil {
-		panic("router: crypto/rand unavailable: " + err.Error())
+		return "", fmt.Errorf("router: crypto/rand unavailable: %w", err)
 	}
-	return hex.EncodeToString(buf[:])
+	return hex.EncodeToString(buf[:]), nil
 }

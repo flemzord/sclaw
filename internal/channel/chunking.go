@@ -2,6 +2,7 @@ package channel
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -62,7 +63,6 @@ func SplitMessage(msg message.OutboundMessage, cfg ChunkConfig) []message.Outbou
 
 			if hasText && currentTextLen+added > cfg.MaxLength {
 				flush()
-				added = len(part)
 			}
 
 			current.Blocks = append(current.Blocks, message.NewTextBlock(part))
@@ -208,11 +208,19 @@ func findFenceEnd(lines []string, start int) (int, bool) {
 }
 
 // forceSplit breaks a single long line into chunks of at most maxLen bytes.
+// It walks back from the cut point to avoid splitting mid-rune in UTF-8 text.
 func forceSplit(line string, maxLen int) []string {
 	var parts []string
 	for len(line) > maxLen {
-		parts = append(parts, line[:maxLen])
-		line = line[maxLen:]
+		cut := maxLen
+		for cut > 0 && !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		if cut == 0 {
+			cut = maxLen
+		}
+		parts = append(parts, line[:cut])
+		line = line[cut:]
 	}
 	if len(line) > 0 {
 		parts = append(parts, line)

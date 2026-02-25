@@ -203,7 +203,7 @@ func (a *ContextAssembler) trimHistory(history []provider.LLMMessage, budget int
 		}
 	}
 
-	if hasSummary && start > 1 {
+	if hasSummary {
 		result := make([]provider.LLMMessage, 0, 1+len(history)-start)
 		result = append(result, history[0])
 		result = append(result, history[start:]...)

@@ -15,20 +15,38 @@ import (
 type MockResponseSender struct {
 	SendFunc  func(ctx context.Context, msg message.OutboundMessage) error
 	mu        sync.Mutex
-	Sent      []message.OutboundMessage
-	SendCalls int
+	sent      []message.OutboundMessage
+	sendCalls int
 }
 
 // Send records the outbound message and optionally delegates to SendFunc.
 func (m *MockResponseSender) Send(ctx context.Context, msg message.OutboundMessage) error {
 	m.mu.Lock()
-	m.SendCalls++
-	m.Sent = append(m.Sent, msg)
+	m.sendCalls++
+	m.sent = append(m.sent, msg)
 	m.mu.Unlock()
 	if m.SendFunc != nil {
 		return m.SendFunc(ctx, msg)
 	}
 	return nil
+}
+
+// SentMessages returns a copy of all recorded outbound messages.
+// Safe for concurrent use.
+func (m *MockResponseSender) SentMessages() []message.OutboundMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]message.OutboundMessage, len(m.sent))
+	copy(cp, m.sent)
+	return cp
+}
+
+// SendCallCount returns the number of times Send was called.
+// Safe for concurrent use.
+func (m *MockResponseSender) SendCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sendCalls
 }
 
 // MockAgentFactory returns agent loops for test sessions.

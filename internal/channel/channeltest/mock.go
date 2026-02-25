@@ -1,32 +1,35 @@
-package channel
+// Package channeltest provides test doubles for the channel package.
+// Production code must never import this package.
+package channeltest
 
 import (
 	"context"
 	"sync"
 
+	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
-// MockChannel is a test double that implements Channel. It records sent
+// MockChannel is a test double that implements channel.Channel. It records sent
 // messages and allows simulating inbound messages via SimulateMessage.
 type MockChannel struct {
 	name      string
 	inbox     func(msg message.InboundMessage) error
 	mu        sync.Mutex
 	sent      []message.OutboundMessage
-	allowList *AllowList
+	allowList *channel.AllowList
 
 	// SendFunc, if set, is called instead of the default recording behavior.
 	SendFunc func(ctx context.Context, msg message.OutboundMessage) error
 }
 
 // Compile-time interface guards.
-var _ Channel = (*MockChannel)(nil)
+var _ channel.Channel = (*MockChannel)(nil)
 
 // NewMockChannel creates a MockChannel with the given name and an optional
 // allow-list. Pass nil for allowList to deny all messages (security by default).
-func NewMockChannel(name string, allowList *AllowList) *MockChannel {
+func NewMockChannel(name string, allowList *channel.AllowList) *MockChannel {
 	return &MockChannel{
 		name:      name,
 		allowList: allowList,
@@ -45,8 +48,11 @@ func (m *MockChannel) ModuleInfo() core.ModuleInfo {
 
 // Send records the outbound message. If SendFunc is set, it delegates to it.
 func (m *MockChannel) Send(ctx context.Context, msg message.OutboundMessage) error {
-	if m.SendFunc != nil {
-		return m.SendFunc(ctx, msg)
+	m.mu.Lock()
+	fn := m.SendFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, msg)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -62,8 +68,8 @@ func (m *MockChannel) SetInbox(fn func(msg message.InboundMessage) error) {
 }
 
 // SimulateMessage pushes an inbound message through the allow-list and into
-// the inbox. It returns ErrDenied if the sender is not allowed, and ErrNoInbox
-// if SetInbox has not been called.
+// the inbox. It returns channel.ErrDenied if the sender is not allowed, and
+// channel.ErrNoInbox if SetInbox has not been called.
 func (m *MockChannel) SimulateMessage(msg message.InboundMessage) error {
 	m.mu.Lock()
 	al := m.allowList
@@ -71,10 +77,10 @@ func (m *MockChannel) SimulateMessage(msg message.InboundMessage) error {
 	m.mu.Unlock()
 
 	if !al.IsAllowed(msg) {
-		return ErrDenied
+		return channel.ErrDenied
 	}
 	if inbox == nil {
-		return ErrNoInbox
+		return channel.ErrNoInbox
 	}
 
 	// Tag the message with this channel's name.
@@ -114,29 +120,32 @@ type MockStreamingChannel struct {
 
 // Compile-time interface guards.
 var (
-	_ StreamingChannel = (*MockStreamingChannel)(nil)
-	_ TypingChannel    = (*MockStreamingChannel)(nil)
+	_ channel.StreamingChannel = (*MockStreamingChannel)(nil)
+	_ channel.TypingChannel    = (*MockStreamingChannel)(nil)
 )
 
 // NewMockStreamingChannel creates a MockStreamingChannel.
-func NewMockStreamingChannel(name string, allowList *AllowList) *MockStreamingChannel {
+func NewMockStreamingChannel(name string, allowList *channel.AllowList) *MockStreamingChannel {
 	return &MockStreamingChannel{
 		MockChannel: NewMockChannel(name, allowList),
 		streaming:   true,
 	}
 }
 
-// SupportsStreaming implements StreamingChannel.
+// SupportsStreaming implements channel.StreamingChannel.
 func (m *MockStreamingChannel) SupportsStreaming() bool {
-	if m.SupportsStreamingFunc != nil {
-		return m.SupportsStreamingFunc()
+	m.mu.Lock()
+	fn := m.SupportsStreamingFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn()
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.streaming
 }
 
-// SendStream implements StreamingChannel. It collects all chunks.
+// SendStream implements channel.StreamingChannel. It collects all chunks.
 func (m *MockStreamingChannel) SendStream(_ context.Context, _ message.Chat, stream <-chan string) error {
 	for chunk := range stream {
 		m.mu.Lock()
@@ -146,7 +155,7 @@ func (m *MockStreamingChannel) SendStream(_ context.Context, _ message.Chat, str
 	return nil
 }
 
-// SendTyping implements TypingChannel. It records the chat.
+// SendTyping implements channel.TypingChannel. It records the chat.
 func (m *MockStreamingChannel) SendTyping(_ context.Context, chat message.Chat) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -1,18 +1,20 @@
-package channel
+package channel_test
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/flemzord/sclaw/internal/channel"
+	"github.com/flemzord/sclaw/internal/channel/channeltest"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
 func TestDispatcher_RegisterAndGet(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
-	al := NewAllowList([]string{"alice"}, nil)
-	ch := NewMockChannel("telegram", al)
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockChannel("telegram", al)
 
 	if err := d.Register("telegram", ch); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -29,22 +31,22 @@ func TestDispatcher_RegisterAndGet(t *testing.T) {
 
 func TestDispatcher_RegisterDuplicate(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
-	al := NewAllowList([]string{"alice"}, nil)
-	ch := NewMockChannel("telegram", al)
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockChannel("telegram", al)
 
 	if err := d.Register("telegram", ch); err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
 	err := d.Register("telegram", ch)
-	if !errors.Is(err, ErrDuplicateChannel) {
+	if !errors.Is(err, channel.ErrDuplicateChannel) {
 		t.Errorf("second Register = %v, want ErrDuplicateChannel", err)
 	}
 }
 
 func TestDispatcher_GetMissing(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
+	d := channel.NewDispatcher()
 	_, ok := d.Get("nonexistent")
 	if ok {
 		t.Error("Get should return false for unknown channel")
@@ -53,10 +55,10 @@ func TestDispatcher_GetMissing(t *testing.T) {
 
 func TestDispatcher_SendDispatchesToCorrectChannel(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
-	al := NewAllowList([]string{"alice"}, nil)
-	ch1 := NewMockChannel("ch1", al)
-	ch2 := NewMockChannel("ch2", al)
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch1 := channeltest.NewMockChannel("ch1", al)
+	ch2 := channeltest.NewMockChannel("ch2", al)
 	_ = d.Register("ch1", ch1)
 	_ = d.Register("ch2", ch2)
 
@@ -83,23 +85,23 @@ func TestDispatcher_SendDispatchesToCorrectChannel(t *testing.T) {
 
 func TestDispatcher_SendUnknownChannel(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
+	d := channel.NewDispatcher()
 	msg := message.OutboundMessage{
 		Channel: "unknown",
 		Chat:    message.Chat{ID: "chat-1"},
 	}
 	err := d.Send(context.Background(), msg)
-	if !errors.Is(err, ErrNoChannel) {
+	if !errors.Is(err, channel.ErrNoChannel) {
 		t.Errorf("Send = %v, want ErrNoChannel", err)
 	}
 }
 
 func TestDispatcher_Channels(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
-	al := NewAllowList([]string{"alice"}, nil)
-	_ = d.Register("a", NewMockChannel("a", al))
-	_ = d.Register("b", NewMockChannel("b", al))
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	_ = d.Register("a", channeltest.NewMockChannel("a", al))
+	_ = d.Register("b", channeltest.NewMockChannel("b", al))
 
 	names := d.Channels()
 	if len(names) != 2 {
@@ -117,9 +119,9 @@ func TestDispatcher_Channels(t *testing.T) {
 
 func TestDispatcher_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
-	d := NewDispatcher()
-	al := NewAllowList([]string{"alice"}, nil)
-	ch := NewMockChannel("test", al)
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockChannel("test", al)
 	_ = d.Register("test", ch)
 
 	// Hammer the dispatcher concurrently to trigger race detection.

@@ -124,10 +124,9 @@ func validatePolicy(policy Policy, ctx string) error {
 }
 
 func resolveExplicitLevel(policy Policy, toolName string) (ApprovalLevel, bool) {
-	for name, level := range policy.Tools {
-		if strings.TrimSpace(name) == toolName {
-			return level, true
-		}
+	// Direct lookup: ValidatePolicyConfig normalizes keys at validation time.
+	if level, ok := policy.Tools[toolName]; ok {
+		return level, true
 	}
 	if toolInList(policy.Allow, toolName) {
 		return ApprovalAllow, true

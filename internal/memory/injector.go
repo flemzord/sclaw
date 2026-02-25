@@ -7,27 +7,29 @@ import (
 	ctxengine "github.com/flemzord/sclaw/internal/context"
 )
 
+// InjectionRequest holds the parameters for InjectMemory.
+type InjectionRequest struct {
+	Store     Store
+	Query     string
+	MaxFacts  int
+	MaxTokens int
+	Estimator ctxengine.TokenEstimator
+}
+
 // InjectMemory retrieves the top-K relevant facts from the store and formats
 // them as a list of strings suitable for inclusion in the system prompt.
 //
 // Returns nil if the store is nil or no relevant facts are found.
 // Token budget is enforced: facts are added until maxTokens is reached.
-func InjectMemory(
-	ctx context.Context,
-	store Store,
-	query string,
-	maxFacts int,
-	maxTokens int,
-	estimator ctxengine.TokenEstimator,
-) ([]string, error) {
-	if store == nil {
+func InjectMemory(ctx context.Context, req InjectionRequest) ([]string, error) {
+	if req.Store == nil {
 		return nil, nil
 	}
-	if maxFacts <= 0 || maxTokens <= 0 {
+	if req.MaxFacts <= 0 || req.MaxTokens <= 0 {
 		return nil, nil
 	}
 
-	facts, err := store.Search(ctx, query, maxFacts)
+	facts, err := req.Store.Search(ctx, req.Query, req.MaxFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +42,7 @@ func InjectMemory(
 
 	for i := range facts {
 		candidate := append(result, facts[i].Content)
-		if estimator.Estimate(FormatFacts(candidate)) > maxTokens {
+		if req.Estimator.Estimate(FormatFacts(candidate)) > req.MaxTokens {
 			break
 		}
 		result = candidate

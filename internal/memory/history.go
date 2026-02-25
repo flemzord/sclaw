@@ -10,6 +10,7 @@ import (
 
 // Exchange represents a single user-assistant exchange in a conversation.
 type Exchange struct {
+	SessionID        string
 	UserMessage      provider.LLMMessage
 	AssistantMessage provider.LLMMessage
 	Timestamp        time.Time

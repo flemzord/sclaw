@@ -41,7 +41,9 @@ func TestInjectMemory_WithFacts(t *testing.T) {
 
 	est := mockEstimator{}
 	// Large token budget so all matching facts are returned.
-	result, err := memory.InjectMemory(ctx, store, "likes", 10, 10000, est)
+	result, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "likes", MaxFacts: 10, MaxTokens: 10000, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,14 +82,18 @@ func TestInjectMemory_TokenBudgetTruncates(t *testing.T) {
 	est := mockEstimator{}
 
 	// Full result with large budget.
-	fullResult, err := memory.InjectMemory(ctx, store, "data", 10, 100000, est)
+	fullResult, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "data", MaxFacts: 10, MaxTokens: 100000, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Limited result with small token budget.
 	// Each fact content is ~80 chars → ~21 tokens each. Budget of 30 should allow ~1 fact.
-	limitedResult, err := memory.InjectMemory(ctx, store, "data", 10, 30, est)
+	limitedResult, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "data", MaxFacts: 10, MaxTokens: 30, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,7 +111,9 @@ func TestInjectMemory_NilStore(t *testing.T) {
 	t.Parallel()
 
 	est := mockEstimator{}
-	result, err := memory.InjectMemory(context.Background(), nil, "query", 10, 1000, est)
+	result, err := memory.InjectMemory(context.Background(), memory.InjectionRequest{
+		Store: nil, Query: "query", MaxFacts: 10, MaxTokens: 1000, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +134,9 @@ func TestInjectMemory_EmptyQuery(t *testing.T) {
 	})
 
 	est := mockEstimator{}
-	result, err := memory.InjectMemory(ctx, store, "", 10, 10000, est)
+	result, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "", MaxFacts: 10, MaxTokens: 10000, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -146,7 +156,9 @@ func TestInjectMemory_MaxFactsZero(t *testing.T) {
 	})
 
 	est := mockEstimator{}
-	result, err := memory.InjectMemory(ctx, store, "likes", 0, 10000, est)
+	result, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "likes", MaxFacts: 0, MaxTokens: 10000, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +177,9 @@ func TestInjectMemory_MaxTokensZero(t *testing.T) {
 	})
 
 	est := mockEstimator{}
-	result, err := memory.InjectMemory(ctx, store, "likes", 10, 0, est)
+	result, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: store, Query: "likes", MaxFacts: 10, MaxTokens: 0, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -183,7 +197,9 @@ func TestInjectMemory_TokenBudgetIncludesFormattingOverhead(t *testing.T) {
 	})
 
 	est := mockEstimator{}
-	result, err := memory.InjectMemory(context.Background(), store, "short", 10, 1, est)
+	result, err := memory.InjectMemory(context.Background(), memory.InjectionRequest{
+		Store: store, Query: "short", MaxFacts: 10, MaxTokens: 1, Estimator: est,
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

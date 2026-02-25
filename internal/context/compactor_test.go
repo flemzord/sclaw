@@ -3,31 +3,12 @@ package ctxengine_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"testing"
 
 	ctxengine "github.com/flemzord/sclaw/internal/context"
 	"github.com/flemzord/sclaw/internal/provider"
 )
-
-// mockEstimator implements ctxengine.TokenEstimator for tests.
-type mockEstimator struct{}
-
-func (m *mockEstimator) Estimate(text string) int { return len(text) }
-
-// makeMessages creates n alternating user/assistant messages.
-func makeMessages(n int) []provider.LLMMessage {
-	msgs := make([]provider.LLMMessage, n)
-	for i := range msgs {
-		role := provider.MessageRoleUser
-		if i%2 == 1 {
-			role = provider.MessageRoleAssistant
-		}
-		msgs[i] = provider.LLMMessage{Role: role, Content: fmt.Sprintf("msg-%d", i)}
-	}
-	return msgs
-}
 
 func TestCompactor_ShouldCompact(t *testing.T) {
 	t.Parallel()
@@ -48,7 +29,7 @@ func TestCompactor_ShouldCompact(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			history := makeMessages(tt.msgCount)
+			history := makeTestMessages(tt.msgCount)
 			if got := c.ShouldCompact(history); got != tt.want {
 				t.Errorf("ShouldCompact(%d messages) = %v, want %v", tt.msgCount, got, tt.want)
 			}
@@ -66,7 +47,7 @@ func TestCompactor_Compact_WithSummarizer(t *testing.T) {
 	summarizer := &mockSummarizer{result: "summary of old messages"}
 	c := ctxengine.NewCompactor(summarizer, &mockEstimator{}, cfg)
 
-	history := makeMessages(8)
+	history := makeTestMessages(8)
 	result, err := c.Compact(context.Background(), history)
 	if err != nil {
 		t.Fatalf("Compact returned unexpected error: %v", err)
@@ -101,7 +82,7 @@ func TestCompactor_Compact_WithoutSummarizer(t *testing.T) {
 	cfg := ctxengine.ContextConfig{RetainRecent: 3}
 	c := ctxengine.NewCompactor(nil, &mockEstimator{}, cfg)
 
-	history := makeMessages(8)
+	history := makeTestMessages(8)
 	result, err := c.Compact(context.Background(), history)
 	if err != nil {
 		t.Fatalf("Compact returned unexpected error: %v", err)
@@ -126,7 +107,7 @@ func TestCompactor_Compact_HistoryUnderRetain(t *testing.T) {
 	cfg := ctxengine.ContextConfig{RetainRecent: 5}
 	c := ctxengine.NewCompactor(nil, &mockEstimator{}, cfg)
 
-	history := makeMessages(2)
+	history := makeTestMessages(2)
 	result, err := c.Compact(context.Background(), history)
 	if err != nil {
 		t.Fatalf("Compact returned unexpected error: %v", err)
@@ -151,7 +132,7 @@ func TestCompactor_Compact_SummarizerError(t *testing.T) {
 	summarizer := &mockSummarizer{err: summarizeErr}
 	c := ctxengine.NewCompactor(summarizer, &mockEstimator{}, cfg)
 
-	history := makeMessages(8)
+	history := makeTestMessages(8)
 	_, err := c.Compact(context.Background(), history)
 	if err == nil {
 		t.Fatal("expected error from Compact, got nil")
@@ -168,7 +149,7 @@ func TestCompactor_EmergencyCompact(t *testing.T) {
 	cfg := ctxengine.ContextConfig{EmergencyRetain: 2}
 	c := ctxengine.NewCompactor(nil, &mockEstimator{}, cfg)
 
-	history := makeMessages(10)
+	history := makeTestMessages(10)
 	result, err := c.EmergencyCompact(context.Background(), history)
 	if err != nil {
 		t.Fatalf("EmergencyCompact returned unexpected error: %v", err)
@@ -199,7 +180,7 @@ func TestCompactor_EmergencyCompact_ShortHistory(t *testing.T) {
 	cfg := ctxengine.ContextConfig{EmergencyRetain: 5}
 	c := ctxengine.NewCompactor(nil, &mockEstimator{}, cfg)
 
-	history := makeMessages(1)
+	history := makeTestMessages(1)
 	result, err := c.EmergencyCompact(context.Background(), history)
 	if err != nil {
 		t.Fatalf("EmergencyCompact returned unexpected error: %v", err)

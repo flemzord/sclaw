@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func (p *integrationProvider) Complete(_ context.Context, req provider.Completio
 	if len(req.Messages) > 0 {
 		content := req.Messages[0].Content
 		// If the prompt contains "Analyze the following exchange", it's extraction.
-		if containsSubstring(content, "extract") || containsSubstring(content, "Facts:") {
+		if strings.Contains(content, "extract") || strings.Contains(content, "Facts:") {
 			return provider.CompletionResponse{Content: p.extractResponse}, nil
 		}
 	}
@@ -38,15 +39,6 @@ func (p *integrationProvider) Stream(_ context.Context, _ provider.CompletionReq
 
 func (p *integrationProvider) ContextWindowSize() int { return 128000 }
 func (p *integrationProvider) ModelName() string      { return "integration-mock" }
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
 
 // TestIntegration_ExchangeToExtractionToInjection tests the full flow:
 // exchange → extraction → storage → injection.
@@ -96,6 +88,7 @@ func TestIntegration_ExchangeToExtractionToInjection(t *testing.T) {
 
 	// Step 3: Extract facts from the exchange.
 	exchange := memory.Exchange{
+		SessionID:        sessionID,
 		UserMessage:      userMsg,
 		AssistantMessage: assistantMsg,
 		Timestamp:        time.Now(),
@@ -109,9 +102,8 @@ func TestIntegration_ExchangeToExtractionToInjection(t *testing.T) {
 		t.Fatalf("expected 3 facts, got %d", len(facts))
 	}
 
-	// Step 4: Store facts in memory.
+	// Step 4: Store facts in memory (Source is set by the extractor via Exchange.SessionID).
 	for i := range facts {
-		facts[i].Source = sessionID
 		if err := memoryStore.Index(ctx, facts[i]); err != nil {
 			t.Fatalf("index fact %d: %v", i, err)
 		}
@@ -122,14 +114,9 @@ func TestIntegration_ExchangeToExtractionToInjection(t *testing.T) {
 	}
 
 	// Step 5: Inject memory for a new query.
-	injected, err := memory.InjectMemory(
-		ctx,
-		memoryStore,
-		"dark mode",
-		10,
-		2000,
-		estimator,
-	)
+	injected, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: memoryStore, Query: "dark mode", MaxFacts: 10, MaxTokens: 2000, Estimator: estimator,
+	})
 	if err != nil {
 		t.Fatalf("inject: %v", err)
 	}
@@ -141,7 +128,7 @@ func TestIntegration_ExchangeToExtractionToInjection(t *testing.T) {
 	// Verify the injected fact mentions "dark mode".
 	found := false
 	for _, fact := range injected {
-		if containsSubstring(fact, "dark mode") {
+		if strings.Contains(fact, "dark mode") {
 			found = true
 			break
 		}
@@ -221,7 +208,7 @@ func TestIntegration_CompactionAndAssembly(t *testing.T) {
 	if result.Messages[0].Role != provider.MessageRoleSystem {
 		t.Errorf("expected first message to be system (summary), got %s", result.Messages[0].Role)
 	}
-	if !containsSubstring(result.Messages[0].Content, "User discussed weather") {
+	if !strings.Contains(result.Messages[0].Content, "User discussed weather") {
 		t.Errorf("expected summary content, got %q", result.Messages[0].Content)
 	}
 
@@ -288,7 +275,9 @@ func TestIntegration_GracefulDegradation(t *testing.T) {
 	estimator := ctxengine.NewCharEstimator(4.0)
 
 	// No memory store → InjectMemory returns nil.
-	injected, err := memory.InjectMemory(ctx, nil, "query", 10, 2000, estimator)
+	injected, err := memory.InjectMemory(ctx, memory.InjectionRequest{
+		Store: nil, Query: "query", MaxFacts: 10, MaxTokens: 2000, Estimator: estimator,
+	})
 	if err != nil {
 		t.Fatalf("inject with nil store: %v", err)
 	}

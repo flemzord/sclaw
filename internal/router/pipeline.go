@@ -9,6 +9,10 @@ import (
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
+// defaultMaxHistoryLen is the default maximum number of LLM messages
+// kept in a session's history. Oldest entries are trimmed when exceeded.
+const defaultMaxHistoryLen = 100
+
 // PipelineConfig groups the dependencies for the 15-step pipeline.
 // Uses request struct pattern for >3 parameters.
 type PipelineConfig struct {
@@ -20,6 +24,11 @@ type PipelineConfig struct {
 	ResponseSender  ResponseSender
 	Pruner          *lazyPruner
 	Logger          *slog.Logger
+
+	// MaxHistoryLen caps the number of LLM messages kept in a session's
+	// history. When exceeded, the oldest entries are trimmed. Zero means
+	// use the default (100).
+	MaxHistoryLen int
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -37,6 +46,9 @@ type Pipeline struct {
 
 // NewPipeline creates a new pipeline with the given configuration.
 func NewPipeline(cfg PipelineConfig) *Pipeline {
+	if cfg.MaxHistoryLen <= 0 {
+		cfg.MaxHistoryLen = defaultMaxHistoryLen
+	}
 	return &Pipeline{cfg: cfg}
 }
 
@@ -63,18 +75,14 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	// Step 3: Approval interception — safety net.
 	// If this message is an approval response, it should have been intercepted
 	// by Router.Submit() before reaching the pipeline. Log a warning if it wasn't.
-	if id, _, ok := p.cfg.ApprovalManager.IsApprovalResponse(env.Message); ok {
-		logger.Warn("pipeline: approval response reached pipeline unexpectedly", "approval_id", id)
+	// Only attempt JSON parsing when the message carries a raw payload.
+	if len(env.Message.Raw) > 0 {
+		if id, _, ok := p.cfg.ApprovalManager.IsApprovalResponse(env.Message); ok {
+			logger.Warn("pipeline: approval response reached pipeline unexpectedly", "approval_id", id)
+		}
 	}
 
-	// Step 4: Agent resolution — get or create agent loop for this session.
-	loop, err := p.cfg.AgentFactory.ForSession(session)
-	if err != nil {
-		p.sendError(ctx, env.Message, "Failed to initialize agent.")
-		return PipelineResult{Session: session, Error: err}
-	}
-
-	// Step 5: Group policy — check if message should be processed.
+	// Step 4: Group policy — check if message should be processed.
 	if !p.cfg.GroupPolicy.ShouldProcess(env.Message) {
 		logger.Debug("pipeline: message filtered by group policy",
 			"sender", env.Message.Sender.ID,
@@ -82,16 +90,30 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Skipped: true}
 	}
 
-	// Step 6: Hook before-process — placeholder, no-op.
+	// Step 5: Hook before-process — placeholder, no-op.
 	// Will be implemented when the hook system is added.
 
-	// Step 7: Lane lock acquire (step 15 releases via defer).
+	// Step 6: Lane lock acquire (step 15 releases via defer).
 	p.cfg.LaneLock.Acquire(env.Key)
 	defer p.cfg.LaneLock.Release(env.Key) // Step 15
+
+	// Step 7: Agent resolution — get or create agent loop for this session.
+	// Called after lane lock acquisition to avoid a data race on the live
+	// session pointer (R1 fix).
+	loop, err := p.cfg.AgentFactory.ForSession(session)
+	if err != nil {
+		p.sendError(ctx, env.Message, "Failed to initialize agent.")
+		return PipelineResult{Session: session, Error: err}
+	}
 
 	// Step 8: History — append user message to session history.
 	llmMsg := messageToLLM(env.Message)
 	session.History = append(session.History, llmMsg)
+
+	// Trim history to MaxHistoryLen to prevent unbounded growth.
+	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
+		session.History = session.History[len(session.History)-limit:]
+	}
 
 	// Step 9: Context — build agent request.
 	// Partial placeholder: uses a hardcoded system prompt for now.

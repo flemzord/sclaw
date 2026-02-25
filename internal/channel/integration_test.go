@@ -8,6 +8,7 @@ import (
 
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/channel"
+	"github.com/flemzord/sclaw/internal/channel/channeltest"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
 	"github.com/flemzord/sclaw/internal/router"
@@ -40,13 +41,13 @@ func (f *echoAgentFactory) ForSession(_ *router.Session) (*agent.Loop, error) {
 }
 
 // TestEndToEnd_MockChannelThroughRouter verifies the full flow:
-// MockChannel → Router.Submit → Pipeline → Agent Loop → Dispatcher → MockChannel.SentMessages
+// MockChannel -> Router.Submit -> Pipeline -> Agent Loop -> Dispatcher -> MockChannel.SentMessages
 func TestEndToEnd_MockChannelThroughRouter(t *testing.T) {
 	t.Parallel()
 
 	// 1. Create a mock channel with an allow-list.
 	al := channel.NewAllowList([]string{"alice"}, nil)
-	ch := channel.NewMockChannel("test", al)
+	ch := channeltest.NewMockChannel("test", al)
 
 	// 2. Create a dispatcher and register the channel.
 	dispatcher := channel.NewDispatcher()
@@ -122,7 +123,7 @@ func TestEndToEnd_DeniedUserGetsNoResponse(t *testing.T) {
 	t.Parallel()
 
 	al := channel.NewAllowList([]string{"alice"}, nil)
-	ch := channel.NewMockChannel("test", al)
+	ch := channeltest.NewMockChannel("test", al)
 
 	// Try to simulate a message from bob (not in allow-list).
 	msg := message.InboundMessage{
@@ -146,7 +147,7 @@ func TestEndToEnd_DeniedUserGetsNoResponse(t *testing.T) {
 func TestEndToEnd_NoAllowListDeniesEveryone(t *testing.T) {
 	t.Parallel()
 
-	ch := channel.NewMockChannel("test", nil)
+	ch := channeltest.NewMockChannel("test", nil)
 
 	msg := message.InboundMessage{
 		ID:     "msg-1",
@@ -167,8 +168,8 @@ func TestEndToEnd_MultipleChannels(t *testing.T) {
 	t.Parallel()
 
 	al := channel.NewAllowList([]string{"alice"}, nil)
-	ch1 := channel.NewMockChannel("slack", al)
-	ch2 := channel.NewMockChannel("telegram", al)
+	ch1 := channeltest.NewMockChannel("slack", al)
+	ch2 := channeltest.NewMockChannel("telegram", al)
 
 	dispatcher := channel.NewDispatcher()
 	_ = dispatcher.Register("slack", ch1)
@@ -230,7 +231,7 @@ func TestEndToEnd_TypingIndicator(t *testing.T) {
 	t.Parallel()
 
 	al := channel.NewAllowList([]string{"alice"}, nil)
-	ch := channel.NewMockStreamingChannel("test", al)
+	ch := channeltest.NewMockStreamingChannel("test", al)
 	chat := message.Chat{ID: "chat-1", Type: message.ChatDM}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -256,7 +257,7 @@ func TestEndToEnd_StreamingChannel(t *testing.T) {
 	t.Parallel()
 
 	al := channel.NewAllowList([]string{"alice"}, nil)
-	ch := channel.NewMockStreamingChannel("test", al)
+	ch := channeltest.NewMockStreamingChannel("test", al)
 
 	if !ch.SupportsStreaming() {
 		t.Fatal("mock streaming channel should support streaming")

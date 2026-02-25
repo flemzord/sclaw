@@ -48,6 +48,12 @@ func (p *lazyPruner) TryPrune() int {
 
 	pruned := p.store.Prune(p.maxIdle)
 
+	// TOCTOU note: There is a deliberate gap between Prune (which removes
+	// idle sessions from the store) and Cleanup (which garbage-collects
+	// orphaned lane entries). This is safe because the lane's `refs` counter
+	// ensures that any in-flight pipeline worker keeps its lane alive even
+	// after the session is pruned from the store. Cleanup only marks
+	// lanes as stale; actual deletion happens only when refs == 0.
 	if p.laneLock != nil {
 		if provider, ok := p.store.(activeKeysProvider); ok {
 			p.laneLock.Cleanup(provider.ActiveKeys())

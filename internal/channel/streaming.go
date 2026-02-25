@@ -45,15 +45,32 @@ func StartTypingLoop(ctx context.Context, ch TypingChannel, chat message.Chat, i
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
+		const maxConsecutiveErrors = 3
+		var consecutiveErrors int
+
 		// Send an initial typing indicator immediately.
-		_ = ch.SendTyping(ctx, chat)
+		if err := ch.SendTyping(ctx, chat); err != nil {
+			consecutiveErrors++
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return
+			}
+		} else {
+			consecutiveErrors = 0
+		}
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = ch.SendTyping(ctx, chat)
+				if err := ch.SendTyping(ctx, chat); err != nil {
+					consecutiveErrors++
+					if consecutiveErrors >= maxConsecutiveErrors {
+						return
+					}
+					continue
+				}
+				consecutiveErrors = 0
 			}
 		}
 	}()

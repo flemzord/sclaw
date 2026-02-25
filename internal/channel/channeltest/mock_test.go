@@ -1,4 +1,4 @@
-package channel
+package channeltest
 
 import (
 	"context"
@@ -6,12 +6,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
 func TestMockChannel_ModuleInfo(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("telegram", al)
 	info := ch.ModuleInfo()
 
@@ -29,7 +30,7 @@ func TestMockChannel_ModuleInfo(t *testing.T) {
 
 func TestMockChannel_SendRecords(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 	msg := message.OutboundMessage{
 		Channel: "test",
@@ -52,7 +53,7 @@ func TestMockChannel_SendRecords(t *testing.T) {
 
 func TestMockChannel_SetInboxAndSimulate(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 
 	var received message.InboundMessage
@@ -79,7 +80,7 @@ func TestMockChannel_SetInboxAndSimulate(t *testing.T) {
 
 func TestMockChannel_SimulateDeniedByAllowList(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 
 	msg := message.InboundMessage{
@@ -87,7 +88,7 @@ func TestMockChannel_SimulateDeniedByAllowList(t *testing.T) {
 		Chat:   message.Chat{ID: "chat-1", Type: message.ChatDM},
 	}
 	err := ch.SimulateMessage(msg)
-	if !errors.Is(err, ErrDenied) {
+	if !errors.Is(err, channel.ErrDenied) {
 		t.Errorf("SimulateMessage = %v, want ErrDenied", err)
 	}
 }
@@ -101,14 +102,14 @@ func TestMockChannel_SimulateDeniedWithoutAllowList(t *testing.T) {
 		Chat:   message.Chat{ID: "chat-1", Type: message.ChatDM},
 	}
 	err := ch.SimulateMessage(msg)
-	if !errors.Is(err, ErrDenied) {
+	if !errors.Is(err, channel.ErrDenied) {
 		t.Errorf("SimulateMessage without allow-list = %v, want ErrDenied", err)
 	}
 }
 
 func TestMockChannel_SimulateWithoutInbox(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 	// No inbox set — should return ErrNoInbox.
 
@@ -117,14 +118,14 @@ func TestMockChannel_SimulateWithoutInbox(t *testing.T) {
 		Chat:   message.Chat{ID: "chat-1", Type: message.ChatDM},
 	}
 	err := ch.SimulateMessage(msg)
-	if !errors.Is(err, ErrNoInbox) {
+	if !errors.Is(err, channel.ErrNoInbox) {
 		t.Errorf("SimulateMessage without inbox = %v, want ErrNoInbox", err)
 	}
 }
 
 func TestMockChannel_Reset(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 
 	_ = ch.Send(context.Background(), message.OutboundMessage{
@@ -145,7 +146,7 @@ func TestMockChannel_Reset(t *testing.T) {
 
 func TestMockChannel_ConcurrentSendAndRead(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockChannel("test", al)
 
 	var wg sync.WaitGroup
@@ -169,7 +170,7 @@ func TestMockChannel_ConcurrentSendAndRead(t *testing.T) {
 
 func TestMockStreamingChannel_SendStream(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockStreamingChannel("test", al)
 
 	if !ch.SupportsStreaming() {
@@ -194,7 +195,7 @@ func TestMockStreamingChannel_SendStream(t *testing.T) {
 
 func TestMockStreamingChannel_SendTyping(t *testing.T) {
 	t.Parallel()
-	al := NewAllowList([]string{"alice"}, nil)
+	al := channel.NewAllowList([]string{"alice"}, nil)
 	ch := NewMockStreamingChannel("test", al)
 
 	chat := message.Chat{ID: "chat-1", Type: message.ChatDM}

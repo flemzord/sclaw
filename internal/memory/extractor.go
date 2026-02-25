@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -63,7 +64,7 @@ func (e *LLMExtractor) Extract(ctx context.Context, exchange Exchange) ([]Fact, 
 }
 
 // parseExtractedFacts parses the LLM response into Fact structs.
-func parseExtractedFacts(response string, _ Exchange) []Fact {
+func parseExtractedFacts(response string, exchange Exchange) []Fact {
 	if response == "" || response == "NONE" {
 		return nil
 	}
@@ -81,6 +82,7 @@ func parseExtractedFacts(response string, _ Exchange) []Fact {
 		facts = append(facts, Fact{
 			ID:        nextFactID(now, i),
 			Content:   line,
+			Source:    exchange.SessionID,
 			CreatedAt: now,
 		})
 	}
@@ -93,39 +95,15 @@ func nextFactID(now time.Time, index int) string {
 	return fmt.Sprintf("%d-%d-%d", now.UnixNano(), index, seq)
 }
 
-// splitLines splits text by newlines, trimming whitespace.
+// splitLines splits text by newlines, trimming whitespace and filtering blanks.
 func splitLines(s string) []string {
 	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			line := trimSpace(s[start:i])
-			if line != "" {
-				lines = append(lines, line)
-			}
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		line := trimSpace(s[start:])
-		if line != "" {
-			lines = append(lines, line)
+	for _, line := range strings.Split(s, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
 		}
 	}
 	return lines
-}
-
-// trimSpace trims leading and trailing whitespace.
-func trimSpace(s string) string {
-	start := 0
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r') {
-		start++
-	}
-	end := len(s)
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
 }
 
 // trimBullet removes leading bullet markers ("- ", "* ", "1. ", etc.).

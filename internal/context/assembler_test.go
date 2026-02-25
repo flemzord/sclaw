@@ -4,38 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
 	ctxengine "github.com/flemzord/sclaw/internal/context"
 	"github.com/flemzord/sclaw/internal/provider"
 )
-
-// mockSummarizer implements ctxengine.Summarizer for assembler tests.
-type mockSummarizer struct {
-	result string
-	err    error
-	called int
-}
-
-func (m *mockSummarizer) Summarize(_ context.Context, _ []provider.LLMMessage) (string, error) {
-	m.called++
-	return m.result, m.err
-}
-
-// makeTestMessages creates n alternating user/assistant messages.
-func makeTestMessages(n int) []provider.LLMMessage {
-	msgs := make([]provider.LLMMessage, n)
-	for i := range msgs {
-		role := provider.MessageRoleUser
-		if i%2 == 1 {
-			role = provider.MessageRoleAssistant
-		}
-		msgs[i] = provider.LLMMessage{Role: role, Content: fmt.Sprintf("message-%d", i)}
-	}
-	return msgs
-}
 
 // ---------------------------------------------------------------------------
 // Basic assembly
