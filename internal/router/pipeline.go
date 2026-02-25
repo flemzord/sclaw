@@ -3,9 +3,11 @@ package router
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/provider"
+	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -29,6 +31,17 @@ type PipelineConfig struct {
 	// history. When exceeded, the oldest entries are trimmed. Zero means
 	// use the default (100).
 	MaxHistoryLen int
+
+	// SoulProvider loads the agent personality prompt (SOUL.md).
+	// Nil → DefaultSoulPrompt.
+	SoulProvider workspace.SoulProvider
+
+	// SkillActivator selects which skills to include in the prompt.
+	// Nil → no skills.
+	SkillActivator *workspace.SkillActivator
+
+	// Skills are the loaded skill definitions (from the workspace skills dir).
+	Skills []workspace.Skill
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -116,10 +129,10 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	// Step 9: Context — build agent request.
-	// Partial placeholder: uses a hardcoded system prompt for now.
+	systemParts := p.buildSystemParts(env.Message)
 	req := agent.Request{
 		Messages:     session.History,
-		SystemPrompt: "You are a helpful assistant.", // Placeholder — will come from config/context engine.
+		SystemPrompt: strings.Join(systemParts, "\n\n"),
 	}
 
 	// Step 10: Agent loop — run the agent.
@@ -157,6 +170,33 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	return PipelineResult{Session: session, Response: &resp}
+}
+
+// buildSystemParts assembles the system prompt parts from SOUL.md and active skills.
+func (p *Pipeline) buildSystemParts(msg message.InboundMessage) []string {
+	var parts []string
+
+	// Load SOUL.md content (personality prompt).
+	soulContent := workspace.DefaultSoulPrompt
+	if p.cfg.SoulProvider != nil {
+		if content, err := p.cfg.SoulProvider.Load(); err == nil && content != "" {
+			soulContent = content
+		}
+	}
+	parts = append(parts, soulContent)
+
+	// Activate and format skills.
+	if p.cfg.SkillActivator != nil && len(p.cfg.Skills) > 0 {
+		active := p.cfg.SkillActivator.Activate(workspace.ActivateRequest{
+			Skills:      p.cfg.Skills,
+			UserMessage: msg.TextContent(),
+		})
+		if formatted := workspace.FormatSkillsForPrompt(active); formatted != "" {
+			parts = append(parts, formatted)
+		}
+	}
+
+	return parts
 }
 
 // sendError sends a user-friendly error message via ResponseSender. Never panics.

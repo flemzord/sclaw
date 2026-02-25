@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
+	"github.com/flemzord/sclaw/internal/workspace"
+	"github.com/flemzord/sclaw/internal/workspace/workspacetest"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -330,5 +333,147 @@ func TestPipeline_SessionReuse(t *testing.T) {
 	// Store should still have exactly 1 session.
 	if store.Len() != 1 {
 		t.Errorf("store length = %d, want 1", store.Len())
+	}
+}
+
+func TestPipeline_WithSoulAndSkills(t *testing.T) {
+	t.Parallel()
+
+	// Capture the messages sent to the provider to extract the system prompt.
+	var capturedMessages []provider.LLMMessage
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
+			capturedMessages = req.Messages
+			return provider.CompletionResponse{
+				Content:      "Aye!",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	soulProvider := &workspacetest.MockSoulProvider{
+		LoadFunc: func() (string, error) {
+			return "You are a pirate captain.", nil
+		},
+	}
+
+	skills := []workspace.Skill{
+		{
+			Meta: workspace.SkillMeta{
+				Name:          "nav",
+				Description:   "Navigation",
+				ToolsRequired: []string{"compass"},
+				Trigger:       workspace.TriggerAlways,
+			},
+			Body: "Navigate the seas.",
+		},
+		{
+			Meta: workspace.SkillMeta{
+				Name:          "review",
+				Description:   "Code review",
+				ToolsRequired: []string{"read_file"},
+				Trigger:       workspace.TriggerAuto,
+				Keywords:      []string{"review"},
+			},
+			Body: "Review the code.",
+		},
+	}
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		SoulProvider:    soulProvider,
+		SkillActivator:  workspace.NewSkillActivator(),
+		Skills:          skills,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// The agent loop injects the system prompt as the first message with role "system".
+	if len(capturedMessages) == 0 {
+		t.Fatal("expected captured messages")
+	}
+	systemMsg := capturedMessages[0]
+	if systemMsg.Role != provider.MessageRoleSystem {
+		t.Fatalf("first message role = %q, want %q", systemMsg.Role, provider.MessageRoleSystem)
+	}
+
+	// Verify the system prompt contains the SOUL content.
+	if !strings.Contains(systemMsg.Content, "You are a pirate captain.") {
+		t.Errorf("system prompt missing SOUL content, got: %q", systemMsg.Content)
+	}
+
+	// The "nav" skill requires "compass" which is not in AvailableTools (empty),
+	// so it should NOT be activated. The "review" skill requires keyword match.
+	// With the default test message ("Hello"), neither skill should activate.
+	if strings.Contains(systemMsg.Content, "Active Skills") {
+		t.Errorf("system prompt should not contain skills (no tools available), got: %q", systemMsg.Content)
+	}
+}
+
+func TestPipeline_NilSoulProvider_DefaultPrompt(t *testing.T) {
+	t.Parallel()
+
+	var capturedMessages []provider.LLMMessage
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
+			capturedMessages = req.Messages
+			return provider.CompletionResponse{
+				Content:      "OK",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// No SoulProvider, no skills — should use DefaultSoulPrompt.
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// The first message should be the system prompt with the default value.
+	if len(capturedMessages) == 0 {
+		t.Fatal("expected captured messages")
+	}
+	systemMsg := capturedMessages[0]
+	if systemMsg.Role != provider.MessageRoleSystem {
+		t.Fatalf("first message role = %q, want %q", systemMsg.Role, provider.MessageRoleSystem)
+	}
+	if systemMsg.Content != workspace.DefaultSoulPrompt {
+		t.Errorf("system prompt = %q, want %q", systemMsg.Content, workspace.DefaultSoulPrompt)
 	}
 }
