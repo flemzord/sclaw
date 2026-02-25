@@ -146,6 +146,9 @@ func TestValidate_ConfigurableModuleMissingConfig(t *testing.T) {
 }
 
 func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
+	// After removing the strict check (which required ALL registered
+	// Configurable modules to have config entries), a configurable module
+	// that is not listed in config is simply not loaded. No error expected.
 	cfgID := t.Name() + ".config"
 	stubID := t.Name() + ".other"
 	registerConfigurable(t, cfgID)
@@ -154,15 +157,8 @@ func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
 		Version: "1",
 		Modules: map[string]yaml.Node{stubID: {}},
 	}
-	err := Validate(cfg)
-	if err == nil {
-		t.Fatal("expected error for configurable module without config entry")
-	}
-	if !strings.Contains(err.Error(), cfgID) {
-		t.Errorf("error should mention %s: %v", cfgID, err)
-	}
-	if !strings.Contains(err.Error(), "requires configuration") {
-		t.Errorf("error should mention requires configuration: %v", err)
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

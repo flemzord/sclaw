@@ -40,10 +40,29 @@ func NewWebhookDispatcher(logger *slog.Logger) *WebhookDispatcher {
 }
 
 // Register adds a handler for the given source with an optional HMAC secret.
+// If a secret was pre-configured via ConfigureSecret, it is preserved unless
+// overridden by a non-empty secret parameter.
 func (d *WebhookDispatcher) Register(source string, h WebhookHandler, secret string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	existing, ok := d.handlers[source]
+	if ok && secret == "" {
+		secret = existing.secret
+	}
 	d.handlers[source] = webhookEntry{handler: h, secret: secret}
+}
+
+// ConfigureSecret pre-configures an HMAC secret for a source from the gateway config.
+// The actual handler is registered later by the module that owns the webhook.
+func (d *WebhookDispatcher) ConfigureSecret(source, secret string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if entry, ok := d.handlers[source]; ok {
+		entry.secret = secret
+		d.handlers[source] = entry
+	} else {
+		d.handlers[source] = webhookEntry{secret: secret}
+	}
 }
 
 // ServeHTTP implements http.Handler. It extracts the source from the chi URL param,

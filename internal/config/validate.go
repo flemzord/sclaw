@@ -12,7 +12,7 @@ import (
 // It verifies the version field, ensures modules are present,
 // and checks that all referenced module IDs exist in the registry.
 // It also enforces that Configurable modules have a config entry
-// and validates plugin and security settings.
+// and validates plugin, security, and agent settings.
 func Validate(cfg *Config) error {
 	var errs []error
 
@@ -44,6 +44,7 @@ func Validate(cfg *Config) error {
 
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)
+
 
 	// Agent validation (skip entirely if no agents defined — backward compatible).
 	if len(cfg.Agents) > 0 {

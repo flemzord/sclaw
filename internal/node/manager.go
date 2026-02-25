@@ -234,12 +234,6 @@ func (m *Manager) handlePairing(ctx context.Context, conn *websocket.Conn, devic
 		return ErrInvalidToken
 	}
 
-	// Check max devices.
-	if m.store.Len() >= m.config.MaxDevices {
-		m.sendPairResponse(ctx, conn, env.ID, false, "", "maximum number of devices reached")
-		return ErrMaxDevices
-	}
-
 	deviceID, err := generateDeviceID()
 	if err != nil {
 		m.sendError(ctx, conn, env.ID, "internal error")
@@ -250,8 +244,13 @@ func (m *Manager) handlePairing(ctx context.Context, conn *websocket.Conn, devic
 	device.Name = req.DeviceName
 	device.Platform = req.Platform
 
+	// Atomically check max devices and add in one operation to avoid TOCTOU race.
+	if !m.store.AddIfUnder(device, m.config.MaxDevices) {
+		m.sendPairResponse(ctx, conn, env.ID, false, "", "maximum number of devices reached")
+		return ErrMaxDevices
+	}
+
 	m.sendPairResponse(ctx, conn, env.ID, true, deviceID, "")
-	m.store.Add(device)
 
 	return nil
 }
@@ -316,7 +315,12 @@ func (m *Manager) readLoop(ctx context.Context, conn *websocket.Conn, device *De
 			}
 			device.mu.Lock()
 			if ch, ok := device.pendingRequests[env.ID]; ok {
-				ch <- resp
+				// Non-blocking send: drop duplicate/late responses to avoid
+				// blocking the read loop while holding device.mu.
+				select {
+				case ch <- resp:
+				default:
+				}
 			}
 			device.mu.Unlock()
 

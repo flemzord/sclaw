@@ -63,11 +63,11 @@ func (g *Gateway) Provision(ctx *core.AppContext) error {
 	ctx.RegisterService("gateway.metrics", g.metrics)
 	ctx.RegisterService("gateway.webhook_dispatcher", g.dispatcher)
 
-	// Configure webhook secrets from config.
+	// Pre-configure webhook HMAC secrets from config.
+	// Actual handlers are registered later by other modules via the dispatcher.
 	for source, cfg := range g.config.Webhooks {
-		// Pre-register source entries so HMAC validation knows about secrets.
-		// Actual handlers are registered by other modules via the dispatcher.
 		if cfg.Secret != "" {
+			g.dispatcher.ConfigureSecret(source, cfg.Secret)
 			g.logger.Info("webhook source configured", "source", source)
 		}
 	}

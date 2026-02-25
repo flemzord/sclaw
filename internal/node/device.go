@@ -100,6 +100,18 @@ func (s *DeviceStore) Add(d *Device) {
 	s.devices[d.ID] = d
 }
 
+// AddIfUnder atomically adds a device only if the current count is below max.
+// Returns false if the store is at capacity.
+func (s *DeviceStore) AddIfUnder(d *Device, limit int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.devices) >= limit {
+		return false
+	}
+	s.devices[d.ID] = d
+	return true
+}
+
 // Get returns the device with the given ID, or false if not found.
 func (s *DeviceStore) Get(id string) (*Device, bool) {
 	s.mu.RLock()

@@ -10,7 +10,7 @@ import (
 
 // StatusResponse is the JSON response for GET /status.
 type StatusResponse struct {
-	Uptime    time.Duration     `json:"uptime_seconds"`
+	Uptime    int64             `json:"uptime_seconds"`
 	Metrics   MetricsSnapshot   `json:"metrics"`
 	Sessions  int               `json:"sessions"`
 	Providers []provider.Status `json:"providers"`
@@ -20,7 +20,7 @@ type StatusResponse struct {
 func (g *Gateway) handleStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := StatusResponse{
-			Uptime:  time.Since(g.startedAt).Truncate(time.Second),
+			Uptime:  int64(time.Since(g.startedAt).Seconds()),
 			Metrics: g.metrics.Snapshot(),
 		}
 

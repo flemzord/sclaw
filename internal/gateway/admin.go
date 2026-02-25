@@ -33,6 +33,15 @@ func (g *Gateway) handleListSessions() http.HandlerFunc {
 
 		if g.sessions != nil {
 			g.sessions.Range(func(key router.SessionKey, sess *router.Session) bool {
+				// Shallow-copy metadata to avoid a data race if the pipeline
+				// mutates the original map after we release the store lock.
+				var metaCopy map[string]any
+				if sess.Metadata != nil {
+					metaCopy = make(map[string]any, len(sess.Metadata))
+					for k, v := range sess.Metadata {
+						metaCopy[k] = v
+					}
+				}
 				sessions = append(sessions, sessionJSON{
 					ID:           sess.ID,
 					Channel:      key.Channel,
@@ -42,7 +51,7 @@ func (g *Gateway) handleListSessions() http.HandlerFunc {
 					CreatedAt:    sess.CreatedAt.Format("2006-01-02T15:04:05Z"),
 					LastActiveAt: sess.LastActiveAt.Format("2006-01-02T15:04:05Z"),
 					HistoryLen:   len(sess.History),
-					Metadata:     sess.Metadata,
+					Metadata:     metaCopy,
 				})
 				return true
 			})

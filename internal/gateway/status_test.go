@@ -59,7 +59,7 @@ func TestStatus_ReturnsMetrics(t *testing.T) {
 	if resp.Metrics.Errors != 1 {
 		t.Errorf("errors = %d, want 1", resp.Metrics.Errors)
 	}
-	if resp.Uptime < 4*time.Second { // at least 4s (it's been 5 minutes, truncated to seconds)
-		t.Errorf("uptime = %v, expected >= 4s", resp.Uptime)
+	if resp.Uptime < 290 { // at least 290s (it's been 5 minutes)
+		t.Errorf("uptime = %d, expected >= 290", resp.Uptime)
 	}
 }
