@@ -66,6 +66,32 @@ func (l *LaneLock) Release(key SessionKey) {
 	ln.mu.Unlock()
 }
 
+// TryAcquire attempts a non-blocking acquire. Returns true if locked.
+// Caller must call Release(key) if true is returned.
+func (l *LaneLock) TryAcquire(key SessionKey) bool {
+	l.mu.Lock()
+	ln, ok := l.lanes[key]
+	if !ok {
+		ln = &lane{}
+		l.lanes[key] = ln
+	}
+	ln.refs++
+	ln.stale = false
+	l.mu.Unlock()
+
+	if !ln.mu.TryLock() {
+		// Failed — undo refs increment.
+		l.mu.Lock()
+		ln.refs--
+		if ln.refs == 0 && ln.stale {
+			delete(l.lanes, key)
+		}
+		l.mu.Unlock()
+		return false
+	}
+	return true
+}
+
 // Cleanup removes lane entries for sessions that are no longer active.
 // activeKeys should contain only the keys of currently live sessions.
 // This prevents unbounded growth of the lane map over time.
