@@ -36,10 +36,12 @@ const (
 
 // LLMMessage represents a single message in a conversation.
 type LLMMessage struct {
-	Role    MessageRole `json:"role"`
-	Content string      `json:"content"`
-	Name    string      `json:"name,omitempty"`
-	ToolID  string      `json:"tool_id,omitempty"`
+	Role      MessageRole `json:"role"`
+	Content   string      `json:"content"`
+	Name      string      `json:"name,omitempty"`
+	ToolID    string      `json:"tool_id,omitempty"`
+	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
+	IsError   bool        `json:"is_error,omitempty"`
 }
 
 // ToolCall represents a tool invocation requested by the model.
