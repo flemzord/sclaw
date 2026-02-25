@@ -132,7 +132,7 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	// Step 7: Agent resolution — get or create agent loop for this session.
 	// Called after lane lock acquisition to avoid a data race on the live
 	// session pointer (R1 fix).
-	loop, err := p.cfg.AgentFactory.ForSession(session)
+	loop, err := p.cfg.AgentFactory.ForSession(session, env.Message)
 	if err != nil {
 		p.sendError(ctx, env.Message, "Failed to initialize agent.")
 		return PipelineResult{Session: session, Error: err}

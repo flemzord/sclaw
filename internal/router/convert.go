@@ -17,7 +17,7 @@ type ResponseSender interface {
 
 // AgentFactory creates agent loops for sessions.
 type AgentFactory interface {
-	ForSession(session *Session) (*agent.Loop, error)
+	ForSession(session *Session, msg message.InboundMessage) (*agent.Loop, error)
 }
 
 // messageToLLM converts an inbound message to a user-role LLM message.

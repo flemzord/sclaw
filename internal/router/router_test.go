@@ -17,7 +17,7 @@ import (
 // noopAgentFactory is a minimal AgentFactory for router-level tests.
 type noopAgentFactory struct{}
 
-func (f *noopAgentFactory) ForSession(_ *Session) (*agent.Loop, error) {
+func (f *noopAgentFactory) ForSession(_ *Session, _ message.InboundMessage) (*agent.Loop, error) {
 	mockProv := &providertest.MockProvider{
 		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
 			return provider.CompletionResponse{
@@ -37,7 +37,7 @@ type blockingAgentFactory struct {
 	once    sync.Once
 }
 
-func (f *blockingAgentFactory) ForSession(_ *Session) (*agent.Loop, error) {
+func (f *blockingAgentFactory) ForSession(_ *Session, _ message.InboundMessage) (*agent.Loop, error) {
 	mockProv := &providertest.MockProvider{
 		CompleteFunc: func(ctx context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
 			if f.started != nil {

@@ -45,6 +45,11 @@ func Validate(cfg *Config) error {
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)
 
+	// Agent validation (skip entirely if no agents defined — backward compatible).
+	if len(cfg.Agents) > 0 {
+		errs = append(errs, validateAgents(cfg)...)
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -76,6 +81,55 @@ func validateSecurity(sec *SecurityConfig) []error {
 		}
 		if len(raw) != 32 { // ed25519.PublicKeySize
 			errs = append(errs, fmt.Errorf("config: security.plugins.trusted_keys[%d]: invalid key size: got %d, want 32", i, len(raw)))
+		}
+	}
+
+	return errs
+}
+
+// agentValidation is a minimal struct used to decode agent YAML nodes
+// for validation purposes without importing the multiagent package.
+type agentValidation struct {
+	Provider string `yaml:"provider"`
+	Routing  struct {
+		Default bool `yaml:"default"`
+	} `yaml:"routing"`
+}
+
+// validateAgents checks agent-specific constraints:
+//   - At most one agent may be marked as default (routing.default: true).
+//   - If an agent references a provider, that provider must exist in cfg.Modules.
+func validateAgents(cfg *Config) []error {
+	var errs []error
+	var defaultAgent string
+
+	for name, node := range cfg.Agents {
+		var av agentValidation
+		if err := node.Decode(&av); err != nil {
+			errs = append(errs, fmt.Errorf("config: agent %q: failed to decode: %w", name, err))
+			continue
+		}
+
+		// Check for duplicate default agents.
+		if av.Routing.Default {
+			if defaultAgent != "" {
+				errs = append(errs, fmt.Errorf(
+					"config: multiple agents marked as default: %q and %q",
+					defaultAgent, name,
+				))
+			} else {
+				defaultAgent = name
+			}
+		}
+
+		// Check that referenced provider exists in modules.
+		if av.Provider != "" {
+			if _, exists := cfg.Modules[av.Provider]; !exists {
+				errs = append(errs, fmt.Errorf(
+					"config: agent %q references unknown provider module %q",
+					name, av.Provider,
+				))
+			}
 		}
 	}
 

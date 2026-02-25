@@ -18,7 +18,7 @@ import (
 // echoAgentFactory returns an agent loop that echoes back the last user message.
 type echoAgentFactory struct{}
 
-func (f *echoAgentFactory) ForSession(_ *router.Session) (*agent.Loop, error) {
+func (f *echoAgentFactory) ForSession(_ *router.Session, _ message.InboundMessage) (*agent.Loop, error) {
 	mock := &providertest.MockProvider{
 		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
 			// Echo the last user message.

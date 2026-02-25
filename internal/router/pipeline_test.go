@@ -43,7 +43,7 @@ type testAgentFactory struct {
 	err  error
 }
 
-func (f *testAgentFactory) ForSession(_ *Session) (*agent.Loop, error) {
+func (f *testAgentFactory) ForSession(_ *Session, _ message.InboundMessage) (*agent.Loop, error) {
 	return f.loop, f.err
 }
 

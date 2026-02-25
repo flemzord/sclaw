@@ -51,13 +51,13 @@ func (m *MockResponseSender) SendCallCount() int {
 
 // MockAgentFactory returns agent loops for test sessions.
 type MockAgentFactory struct {
-	ForSessionFunc func(session *router.Session) (*agent.Loop, error)
+	ForSessionFunc func(session *router.Session, msg message.InboundMessage) (*agent.Loop, error)
 }
 
 // ForSession delegates to ForSessionFunc if set, otherwise returns nil.
-func (m *MockAgentFactory) ForSession(session *router.Session) (*agent.Loop, error) {
+func (m *MockAgentFactory) ForSession(session *router.Session, msg message.InboundMessage) (*agent.Loop, error) {
 	if m.ForSessionFunc != nil {
-		return m.ForSessionFunc(session)
+		return m.ForSessionFunc(session, msg)
 	}
 	return nil, nil
 }
