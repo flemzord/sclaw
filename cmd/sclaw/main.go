@@ -10,6 +10,8 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/pkg/app"
 	"github.com/spf13/cobra"
+
+	_ "github.com/flemzord/sclaw/internal/gateway"
 )
 
 // Set by goreleaser ldflags.

@@ -282,6 +282,53 @@ func TestAppContext_LoadModule_NotConfigurable(t *testing.T) {
 	}
 }
 
+func TestAppContext_ServiceRegistry(t *testing.T) {
+	ctx := NewAppContext(nil, "/data", "/ws")
+
+	// Initially empty.
+	if _, ok := ctx.Service("foo"); ok {
+		t.Error("expected no service before registration")
+	}
+
+	// Register and retrieve.
+	ctx.RegisterService("foo", "bar")
+	svc, ok := ctx.Service("foo")
+	if !ok {
+		t.Fatal("expected service after registration")
+	}
+	if svc.(string) != "bar" {
+		t.Errorf("service = %q, want %q", svc, "bar")
+	}
+}
+
+func TestAppContext_ServiceRegistry_SharedAcrossCopies(t *testing.T) {
+	ctx := NewAppContext(nil, "/data", "/ws")
+
+	// Register on original.
+	ctx.RegisterService("svc1", "value1")
+
+	// ForModule creates a shallow copy — registry pointer should be shared.
+	child := ctx.ForModule("test.module")
+	svc, ok := child.Service("svc1")
+	if !ok || svc.(string) != "value1" {
+		t.Error("ForModule copy should share registry")
+	}
+
+	// Register on child — should be visible from original.
+	child.RegisterService("svc2", "value2")
+	svc2, ok := ctx.Service("svc2")
+	if !ok || svc2.(string) != "value2" {
+		t.Error("registration on child should be visible from parent")
+	}
+
+	// WithModuleConfigs also shares.
+	copy2 := ctx.WithModuleConfigs(nil)
+	svc3, ok := copy2.Service("svc2")
+	if !ok || svc3.(string) != "value2" {
+		t.Error("WithModuleConfigs copy should share registry")
+	}
+}
+
 func TestAppContext_ForModule_PropagatesConfig(t *testing.T) {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte("key: val"), &node); err != nil {

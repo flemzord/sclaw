@@ -4,9 +4,34 @@ package core
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+// serviceRegistry is a concurrent-safe container for cross-module service discovery.
+// Modules register services during Provision() and look them up during Start().
+type serviceRegistry struct {
+	mu       sync.RWMutex
+	services map[string]any
+}
+
+func newServiceRegistry() *serviceRegistry {
+	return &serviceRegistry{services: make(map[string]any)}
+}
+
+func (r *serviceRegistry) set(name string, svc any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.services[name] = svc
+}
+
+func (r *serviceRegistry) get(name string) (any, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	svc, ok := r.services[name]
+	return svc, ok
+}
 
 // AppContext carries shared resources available to modules during provisioning
 // and at runtime.
@@ -22,6 +47,7 @@ type AppContext struct {
 
 	parentLogger  *slog.Logger
 	moduleConfigs map[string]yaml.Node
+	registry      *serviceRegistry
 }
 
 // NewAppContext creates a new AppContext with the given base logger and directories.
@@ -34,7 +60,19 @@ func NewAppContext(logger *slog.Logger, dataDir, workspace string) *AppContext {
 		DataDir:      dataDir,
 		Workspace:    workspace,
 		parentLogger: logger,
+		registry:     newServiceRegistry(),
 	}
+}
+
+// RegisterService stores a named service in the shared registry.
+// Services registered during Provision() are available to all modules at Start().
+func (ctx *AppContext) RegisterService(name string, svc any) {
+	ctx.registry.set(name, svc)
+}
+
+// Service retrieves a named service from the shared registry.
+func (ctx *AppContext) Service(name string) (any, bool) {
+	return ctx.registry.get(name)
 }
 
 // WithModuleConfigs returns a copy of the AppContext with module configurations set.
@@ -54,6 +92,7 @@ func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
 		Workspace:     ctx.Workspace,
 		parentLogger:  ctx.parentLogger,
 		moduleConfigs: ctx.moduleConfigs,
+		registry:      ctx.registry,
 	}
 }
 

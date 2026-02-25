@@ -188,3 +188,8 @@ func (r *Router) Stop(_ context.Context) {
 func (r *Router) PruneSessions() int {
 	return r.pruner.TryPrune()
 }
+
+// Sessions returns the session store for external inspection.
+func (r *Router) Sessions() SessionStore {
+	return r.store
+}
