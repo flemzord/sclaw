@@ -7,17 +7,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
-
-func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
-	t.Helper()
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		t.Fatalf("encode response: %v", err)
-	}
-}
 
 func TestGetMe(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +168,6 @@ func TestRateLimitRetry(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := calls.Add(1)
 		if n == 1 {
-			// First call: 429 with retry_after.
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			writeJSON(t, w, APIResponse[json.RawMessage]{
@@ -186,7 +178,6 @@ func TestRateLimitRetry(t *testing.T) {
 			})
 			return
 		}
-		// Second call: success.
 		writeJSON(t, w, APIResponse[User]{
 			OK: true,
 			Result: User{
@@ -278,7 +269,7 @@ func TestConfigDefaults(t *testing.T) {
 func TestConfigDefaultsPreservesValues(t *testing.T) {
 	cfg := Config{
 		Mode:           "webhook",
-		PollingTimeout: 60,
+		PollingTimeout: 50,
 		APIURL:         "https://custom.api.example.com",
 	}
 	cfg.defaults()
@@ -286,8 +277,8 @@ func TestConfigDefaultsPreservesValues(t *testing.T) {
 	if cfg.Mode != "webhook" {
 		t.Errorf("Mode = %q, want %q", cfg.Mode, "webhook")
 	}
-	if cfg.PollingTimeout != 60 {
-		t.Errorf("PollingTimeout = %d, want 60", cfg.PollingTimeout)
+	if cfg.PollingTimeout != 50 {
+		t.Errorf("PollingTimeout = %d, want 50", cfg.PollingTimeout)
 	}
 	if cfg.APIURL != "https://custom.api.example.com" {
 		t.Errorf("APIURL = %q, want %q", cfg.APIURL, "https://custom.api.example.com")
@@ -305,5 +296,23 @@ func TestAPIErrorMessage(t *testing.T) {
 	want2 := "telegram: 400 Bad Request"
 	if got := err2.Error(); got != want2 {
 		t.Errorf("Error() = %q, want %q", got, want2)
+	}
+}
+
+func TestRedactToken(t *testing.T) {
+	got := redactToken(`Post "https://api.telegram.org/bot123:SECRET/getMe": connection refused`, "123:SECRET")
+	if strings.Contains(got, "123:SECRET") {
+		t.Errorf("redactToken still contains token: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Errorf("redactToken should contain [REDACTED]: %s", got)
+	}
+}
+
+func TestRedactTokenEmpty(t *testing.T) {
+	input := "some error message"
+	got := redactToken(input, "")
+	if got != input {
+		t.Errorf("redactToken with empty token should return input unchanged, got %q", got)
 	}
 }

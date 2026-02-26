@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -30,7 +31,7 @@ func NewClient(token, baseURL string) *Client {
 		token:   token,
 		baseURL: baseURL,
 		http: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 30 * time.Second,
 		},
 	}
 }
@@ -62,9 +63,9 @@ func do[T any](ctx context.Context, c *Client, method string, payload any) (*T, 
 
 		resp, err := c.http.Do(req)
 		if err != nil {
-			// Wrap without the raw error to avoid leaking the token-bearing URL
-			// in error messages. The original error is still available via Unwrap.
-			return nil, fmt.Errorf("telegram: %s request failed: %w", method, err)
+			// Do NOT wrap with %w — the original *url.Error contains the
+			// token-bearing URL which would leak into logs via .Error().
+			return nil, fmt.Errorf("telegram: %s request failed: %s", method, redactToken(err.Error(), c.token))
 		}
 
 		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
@@ -118,111 +119,6 @@ func do[T any](ctx context.Context, c *Client, method string, payload any) (*T, 
 
 	// Unreachable under normal flow, but satisfy the compiler.
 	return nil, fmt.Errorf("telegram: %s: max retries exceeded", method)
-}
-
-// GetUpdatesRequest is the request body for the getUpdates method.
-type GetUpdatesRequest struct {
-	Offset         int      `json:"offset,omitempty"`
-	Limit          int      `json:"limit,omitempty"`
-	Timeout        int      `json:"timeout,omitempty"`
-	AllowedUpdates []string `json:"allowed_updates,omitempty"`
-}
-
-// SetWebhookRequest is the request body for the setWebhook method.
-type SetWebhookRequest struct {
-	URL            string   `json:"url"`
-	SecretToken    string   `json:"secret_token,omitempty"`
-	AllowedUpdates []string `json:"allowed_updates,omitempty"`
-	MaxConnections int      `json:"max_connections,omitempty"`
-}
-
-// SendMessageRequest is the request body for the sendMessage method.
-type SendMessageRequest struct {
-	ChatID                int64  `json:"chat_id"`
-	Text                  string `json:"text"`
-	ParseMode             string `json:"parse_mode,omitempty"`
-	DisableWebPagePreview bool   `json:"disable_web_page_preview,omitempty"`
-	DisableNotification   bool   `json:"disable_notification,omitempty"`
-	ReplyToMessageID      int    `json:"reply_to_message_id,omitempty"`
-	MessageThreadID       int    `json:"message_thread_id,omitempty"`
-}
-
-// EditMessageTextRequest is the request body for the editMessageText method.
-type EditMessageTextRequest struct {
-	ChatID                int64  `json:"chat_id"`
-	MessageID             int    `json:"message_id"`
-	Text                  string `json:"text"`
-	ParseMode             string `json:"parse_mode,omitempty"`
-	DisableWebPagePreview bool   `json:"disable_web_page_preview,omitempty"`
-}
-
-// SendPhotoRequest is the request body for the sendPhoto method.
-type SendPhotoRequest struct {
-	ChatID              int64  `json:"chat_id"`
-	Photo               string `json:"photo"`
-	Caption             string `json:"caption,omitempty"`
-	ParseMode           string `json:"parse_mode,omitempty"`
-	DisableNotification bool   `json:"disable_notification,omitempty"`
-	ReplyToMessageID    int    `json:"reply_to_message_id,omitempty"`
-	MessageThreadID     int    `json:"message_thread_id,omitempty"`
-}
-
-// SendAudioRequest is the request body for the sendAudio method.
-type SendAudioRequest struct {
-	ChatID              int64  `json:"chat_id"`
-	Audio               string `json:"audio"`
-	Caption             string `json:"caption,omitempty"`
-	ParseMode           string `json:"parse_mode,omitempty"`
-	Duration            int    `json:"duration,omitempty"`
-	Performer           string `json:"performer,omitempty"`
-	Title               string `json:"title,omitempty"`
-	DisableNotification bool   `json:"disable_notification,omitempty"`
-	ReplyToMessageID    int    `json:"reply_to_message_id,omitempty"`
-	MessageThreadID     int    `json:"message_thread_id,omitempty"`
-}
-
-// SendVoiceRequest is the request body for the sendVoice method.
-type SendVoiceRequest struct {
-	ChatID              int64  `json:"chat_id"`
-	Voice               string `json:"voice"`
-	Caption             string `json:"caption,omitempty"`
-	ParseMode           string `json:"parse_mode,omitempty"`
-	Duration            int    `json:"duration,omitempty"`
-	DisableNotification bool   `json:"disable_notification,omitempty"`
-	ReplyToMessageID    int    `json:"reply_to_message_id,omitempty"`
-	MessageThreadID     int    `json:"message_thread_id,omitempty"`
-}
-
-// SendDocumentRequest is the request body for the sendDocument method.
-type SendDocumentRequest struct {
-	ChatID              int64  `json:"chat_id"`
-	Document            string `json:"document"`
-	Caption             string `json:"caption,omitempty"`
-	ParseMode           string `json:"parse_mode,omitempty"`
-	DisableNotification bool   `json:"disable_notification,omitempty"`
-	ReplyToMessageID    int    `json:"reply_to_message_id,omitempty"`
-	MessageThreadID     int    `json:"message_thread_id,omitempty"`
-}
-
-// SendLocationRequest is the request body for the sendLocation method.
-type SendLocationRequest struct {
-	ChatID              int64   `json:"chat_id"`
-	Latitude            float64 `json:"latitude"`
-	Longitude           float64 `json:"longitude"`
-	DisableNotification bool    `json:"disable_notification,omitempty"`
-	ReplyToMessageID    int     `json:"reply_to_message_id,omitempty"`
-	MessageThreadID     int     `json:"message_thread_id,omitempty"`
-}
-
-// sendChatActionRequest is the request body for the sendChatAction method.
-type sendChatActionRequest struct {
-	ChatID int64  `json:"chat_id"`
-	Action string `json:"action"`
-}
-
-// getFileRequest is the request body for the getFile method.
-type getFileRequest struct {
-	FileID string `json:"file_id"`
 }
 
 // GetMe returns the bot's user information.
@@ -303,4 +199,12 @@ func (c *Client) GetFile(ctx context.Context, fileID string) (*File, error) {
 // FileURL returns the download URL for a file path returned by GetFile.
 func (c *Client) FileURL(filePath string) string {
 	return fmt.Sprintf("%s/file/bot%s/%s", c.baseURL, c.token, filePath)
+}
+
+// redactToken replaces occurrences of the bot token in s with [REDACTED].
+func redactToken(s, token string) string {
+	if token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, token, "[REDACTED]")
 }

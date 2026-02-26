@@ -99,7 +99,7 @@ func TestLifecycle(t *testing.T) {
 	tg := &Telegram{}
 
 	cfgYAML := `
-token: "TEST_TOKEN"
+token: "123:TEST_TOKEN"
 mode: "polling"
 polling_timeout: 0
 allow_users: ["42"]
@@ -115,8 +115,8 @@ api_url: "` + srv.URL + `"
 		t.Fatalf("Configure() error: %v", err)
 	}
 
-	if tg.config.Token != "TEST_TOKEN" {
-		t.Errorf("config.Token = %q, want %q", tg.config.Token, "TEST_TOKEN")
+	if tg.config.Token != "123:TEST_TOKEN" {
+		t.Errorf("config.Token = %q, want %q", tg.config.Token, "123:TEST_TOKEN")
 	}
 	if tg.config.Mode != "polling" {
 		t.Errorf("config.Mode = %q, want %q", tg.config.Mode, "polling")
@@ -249,7 +249,7 @@ func TestValidateRejectsEmptyToken(t *testing.T) {
 // TestValidateRejectsInvalidMode verifies that Validate rejects unknown modes.
 func TestValidateRejectsInvalidMode(t *testing.T) {
 	tg := &Telegram{}
-	tg.config.Token = "test"
+	tg.config.Token = "123:abc"
 	tg.config.Mode = "invalid"
 
 	if err := tg.Validate(); err == nil {
@@ -260,7 +260,7 @@ func TestValidateRejectsInvalidMode(t *testing.T) {
 // TestValidateWebhookRequiresURL verifies webhook mode needs a URL.
 func TestValidateWebhookRequiresURL(t *testing.T) {
 	tg := &Telegram{}
-	tg.config.Token = "test"
+	tg.config.Token = "123:abc"
 	tg.config.Mode = "webhook"
 	tg.config.WebhookURL = ""
 
