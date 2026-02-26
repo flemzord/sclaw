@@ -15,14 +15,20 @@ import (
 // openAI wire types for JSON serialization.
 
 type oaiRequest struct {
-	Model       string       `json:"model"`
-	Messages    []oaiMessage `json:"messages"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	Stream      bool         `json:"stream,omitempty"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
-	Temperature *float64     `json:"temperature,omitempty"`
-	TopP        *float64     `json:"top_p,omitempty"`
-	Stop        []string     `json:"stop,omitempty"`
+	Model         string            `json:"model"`
+	Messages      []oaiMessage      `json:"messages"`
+	Tools         []oaiTool         `json:"tools,omitempty"`
+	Stream        bool              `json:"stream,omitempty"`
+	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
+	MaxTokens     int               `json:"max_tokens,omitempty"`
+	Temperature   *float64          `json:"temperature,omitempty"`
+	TopP          *float64          `json:"top_p,omitempty"`
+	Stop          []string          `json:"stop,omitempty"`
+}
+
+// oaiStreamOptions controls streaming behavior.
+type oaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type oaiMessage struct {
@@ -115,6 +121,12 @@ func buildRequest(model string, configMaxTokens int, req provider.CompletionRequ
 		Stop:        req.Stop,
 	}
 
+	// Request usage stats in the final streaming chunk so callers
+	// can track token consumption even in streaming mode.
+	if stream {
+		oai.StreamOptions = &oaiStreamOptions{IncludeUsage: true}
+	}
+
 	if len(req.Tools) > 0 {
 		oai.Tools = make([]oaiTool, len(req.Tools))
 		for i, t := range req.Tools {
@@ -175,7 +187,9 @@ func mapFinishReason(reason string) provider.FinishReason {
 	case "content_filter":
 		return provider.FinishReasonFiltering
 	default:
-		return provider.FinishReasonStop
+		// Pass through unknown finish reasons rather than silently
+		// converting them to "stop", which could mask provider-specific values.
+		return provider.FinishReason(reason)
 	}
 }
 
@@ -186,7 +200,7 @@ func (p *Provider) doRequest(ctx context.Context, body oaiRequest) (*http.Respon
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	endpoint := strings.TrimRight(p.config.BaseURL, "/") + "/chat/completions"
+	endpoint := p.config.BaseURL + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -228,6 +242,8 @@ func handleErrorResponse(resp *http.Response) error {
 			return fmt.Errorf("%w: %s", provider.ErrContextLength, body)
 		}
 		return fmt.Errorf("bad request: %s", body)
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return fmt.Errorf("%w: HTTP %d: %s", provider.ErrAuthentication, resp.StatusCode, body)
 	default:
 		return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, body)
 	}

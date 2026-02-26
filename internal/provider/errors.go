@@ -18,6 +18,9 @@ var (
 
 	// ErrNoProvider indicates no provider is configured for the requested role.
 	ErrNoProvider = errors.New("no provider configured")
+
+	// ErrAuthentication indicates the provider rejected the credentials (401/403).
+	ErrAuthentication = errors.New("provider authentication failed")
 )
 
 // IsRetryable reports whether the error is transient and the request
