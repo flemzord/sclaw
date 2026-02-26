@@ -1,0 +1,34 @@
+version: "1"
+
+modules:
+  # Memory SQLite
+  memory.sqlite: {}
+
+  # Telegram channel
+  channel.telegram:
+    token: "TELEGRAM TOKEN" # Bot token (format: 123:ABC-xxx)
+    mode: "polling" # "polling" (simple) or "webhook"
+    allow_users: ["CHAT_ID"] # Allowed Telegram IDs (optional)
+    max_message_length: 4096
+    stream_flush_interval: 1s
+
+  # Provider OpenAI
+  provider.openai_compatible:
+    base_url: "https://api.openai.com/v1"
+    api_key: "OPENAI_TOKEN"
+    model: "gpt-5.2"
+    context_window: 128000
+    timeout: 30s
+
+agents:
+  main:
+    data_dir: "/tmp/agents/main"
+    provider: "provider.openai_compatible"
+    memory:
+      enabled: true
+    routing:
+      channels: ["telegram"]
+      default: true
+    loop:
+      max_iterations: 10
+      timeout: 5m
