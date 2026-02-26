@@ -12,10 +12,68 @@ import (
 	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/channel/channeltest"
 	"github.com/flemzord/sclaw/internal/hook"
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
 	"github.com/flemzord/sclaw/pkg/message"
 )
+
+// testHistoryResolver is a simple in-test mock for HistoryResolver.
+type testHistoryResolver struct {
+	store memory.HistoryStore
+}
+
+func (r *testHistoryResolver) ResolveHistory(_ string) memory.HistoryStore {
+	return r.store
+}
+
+// inMemoryHistoryStore implements memory.HistoryStore for testing with a simple map.
+type inMemoryHistoryStore struct {
+	mu       sync.Mutex
+	messages map[string][]provider.LLMMessage
+}
+
+func newInMemoryHistoryStore() *inMemoryHistoryStore {
+	return &inMemoryHistoryStore{messages: make(map[string][]provider.LLMMessage)}
+}
+
+func (s *inMemoryHistoryStore) Append(sessionID string, msg provider.LLMMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messages[sessionID] = append(s.messages[sessionID], msg)
+	return nil
+}
+
+func (s *inMemoryHistoryStore) GetRecent(sessionID string, n int) ([]provider.LLMMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msgs := s.messages[sessionID]
+	if len(msgs) <= n {
+		cp := make([]provider.LLMMessage, len(msgs))
+		copy(cp, msgs)
+		return cp, nil
+	}
+	cp := make([]provider.LLMMessage, n)
+	copy(cp, msgs[len(msgs)-n:])
+	return cp, nil
+}
+
+func (s *inMemoryHistoryStore) GetAll(sessionID string) ([]provider.LLMMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]provider.LLMMessage, len(s.messages[sessionID]))
+	copy(cp, s.messages[sessionID])
+	return cp, nil
+}
+
+func (s *inMemoryHistoryStore) SetSummary(string, string) error   { return nil }
+func (s *inMemoryHistoryStore) GetSummary(string) (string, error) { return "", nil }
+func (s *inMemoryHistoryStore) Purge(string) error                { return nil }
+func (s *inMemoryHistoryStore) Len(sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.messages[sessionID]), nil
+}
 
 // testResponseSender records sent messages for test assertions.
 type testResponseSender struct {
@@ -627,6 +685,124 @@ func TestPipeline_TypingIndicator_NonTypingChannel(t *testing.T) {
 	result := pipeline.Execute(context.Background(), env)
 
 	// Should succeed without error — just no typing indicator sent.
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Response == nil {
+		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestPipeline_HistoryPersistAndRestore(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("Persisted!")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	histStore := newInMemoryHistoryStore()
+	resolver := &testHistoryResolver{store: histStore}
+
+	// Factory that also sets the AgentID on the session.
+	factory := &testAgentFactory{loop: loop}
+	agentSettingFactory := &agentIDSettingFactory{
+		inner:   factory,
+		agentID: "assistant",
+	}
+
+	sessionStore := NewInMemorySessionStore()
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           sessionStore,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    agentSettingFactory,
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		HistoryResolver: resolver,
+	})
+
+	env := testEnvelope()
+
+	// Execute first message.
+	result := pipeline.Execute(context.Background(), env)
+	if result.Error != nil {
+		t.Fatalf("first execution error: %v", result.Error)
+	}
+
+	// Verify messages were persisted.
+	pKey := persistenceKey(env.Key)
+	persisted, err := histStore.GetAll(pKey)
+	if err != nil {
+		t.Fatalf("GetAll: %v", err)
+	}
+	if len(persisted) != 2 {
+		t.Fatalf("expected 2 persisted messages, got %d", len(persisted))
+	}
+	if persisted[0].Role != provider.MessageRoleUser {
+		t.Errorf("persisted[0].Role = %q, want user", persisted[0].Role)
+	}
+	if persisted[1].Role != provider.MessageRoleAssistant {
+		t.Errorf("persisted[1].Role = %q, want assistant", persisted[1].Role)
+	}
+
+	// Simulate a restart: delete session from store, then send another message.
+	// The session should be recreated and history should be restored from SQLite.
+	sessionStore.Delete(env.Key)
+
+	result2 := pipeline.Execute(context.Background(), env)
+	if result2.Error != nil {
+		t.Fatalf("second execution error: %v", result2.Error)
+	}
+
+	// After restore (2 msgs) + new user + new assistant = 4 in session.History.
+	if len(result2.Session.History) != 4 {
+		t.Errorf("session history after restore = %d, want 4", len(result2.Session.History))
+	}
+
+	// Verify the first entry is the restored user message.
+	if result2.Session.History[0].Role != provider.MessageRoleUser {
+		t.Errorf("restored[0].Role = %q, want user", result2.Session.History[0].Role)
+	}
+}
+
+// agentIDSettingFactory wraps a factory and sets AgentID on the session.
+type agentIDSettingFactory struct {
+	inner   AgentFactory
+	agentID string
+}
+
+func (f *agentIDSettingFactory) ForSession(session *Session, msg message.InboundMessage) (*agent.Loop, error) {
+	if session.AgentID == "" {
+		session.AgentID = f.agentID
+	}
+	return f.inner.ForSession(session, msg)
+}
+
+func TestPipeline_HistoryResolver_Nil(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("OK")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// HistoryResolver is nil — pipeline should not panic (backward compat).
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		HistoryResolver: nil,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}

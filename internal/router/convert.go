@@ -7,12 +7,26 @@ import (
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/hook"
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
 // Compile-time check that sessionViewAdapter implements hook.SessionView.
 var _ hook.SessionView = (*sessionViewAdapter)(nil)
+
+// HistoryResolver returns the persistent HistoryStore for a given agent.
+// Returns nil if the agent has memory disabled or no persistent store is configured.
+type HistoryResolver interface {
+	ResolveHistory(agentID string) memory.HistoryStore
+}
+
+// persistenceKey derives a stable key from a SessionKey for history persistence.
+// The key survives session recreation (new UUID) because it is based on the
+// immutable channel/chat/thread triple.
+func persistenceKey(key SessionKey) string {
+	return key.Channel + ":" + key.ChatID + ":" + key.ThreadID
+}
 
 // ResponseSender delivers outbound messages to a channel.
 type ResponseSender interface {

@@ -42,6 +42,11 @@ type PipelineConfig struct {
 	// history. When exceeded, the oldest entries are trimmed. Zero means
 	// use the default (100).
 	MaxHistoryLen int
+
+	// HistoryResolver, if non-nil, provides per-agent persistent storage.
+	// When set, history is restored from SQLite on new sessions and
+	// persisted after each user/assistant message (write-behind, non-fatal).
+	HistoryResolver HistoryResolver
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -154,6 +159,23 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Error: err}
 	}
 
+	// Step 7b: History restore — if the session was just created and a
+	// persistent store is available, restore previous history from SQLite.
+	if created && p.cfg.HistoryResolver != nil && session.AgentID != "" {
+		if store := p.cfg.HistoryResolver.ResolveHistory(session.AgentID); store != nil {
+			pKey := persistenceKey(env.Key)
+			restored, err := store.GetRecent(pKey, p.cfg.MaxHistoryLen)
+			if err != nil {
+				logger.Warn("pipeline: failed to restore history from SQLite",
+					"session_id", session.ID, "error", err)
+			} else if len(restored) > 0 {
+				session.History = restored
+				logger.Info("pipeline: restored history from SQLite",
+					"session_id", session.ID, "messages", len(restored))
+			}
+		}
+	}
+
 	// Step 8: History — append user message to session history.
 	llmMsg := messageToLLM(env.Message)
 	session.History = append(session.History, llmMsg)
@@ -161,6 +183,17 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	// Trim history to MaxHistoryLen to prevent unbounded growth.
 	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
 		session.History = session.History[len(session.History)-limit:]
+	}
+
+	// Step 8b: Persist user message to SQLite (write-behind, non-fatal).
+	if p.cfg.HistoryResolver != nil && session.AgentID != "" {
+		if store := p.cfg.HistoryResolver.ResolveHistory(session.AgentID); store != nil {
+			pKey := persistenceKey(env.Key)
+			if err := store.Append(pKey, llmMsg); err != nil {
+				logger.Warn("pipeline: failed to persist user message",
+					"session_id", session.ID, "error", err)
+			}
+		}
 	}
 
 	// Step 9: Context — build agent request.
@@ -231,6 +264,17 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	// history may exceed MaxHistoryLen by 1. Trim it here to maintain the invariant.
 	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
 		session.History = session.History[len(session.History)-limit:]
+	}
+
+	// Step 13b: Persist assistant message to SQLite (write-behind, non-fatal).
+	if p.cfg.HistoryResolver != nil && session.AgentID != "" {
+		if store := p.cfg.HistoryResolver.ResolveHistory(session.AgentID); store != nil {
+			pKey := persistenceKey(env.Key)
+			if err := store.Append(pKey, assistantMsg); err != nil {
+				logger.Warn("pipeline: failed to persist assistant message",
+					"session_id", session.ID, "error", err)
+			}
+		}
 	}
 
 	// Step 14: Hook after-send (fire-and-forget).

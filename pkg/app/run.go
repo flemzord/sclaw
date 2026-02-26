@@ -119,6 +119,10 @@ func Run(params RunParams) error {
 		if err != nil {
 			return err
 		}
+		multiagent.ResolveDefaults(agents, dataDir)
+		if err := multiagent.EnsureDirectories(agents); err != nil {
+			return err
+		}
 		registry, err := multiagent.NewRegistry(agents, order)
 		if err != nil {
 			return err

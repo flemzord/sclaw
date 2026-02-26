@@ -41,6 +41,10 @@ type Config struct {
 
 	// MaxSessions limits the number of concurrent sessions. Zero means unlimited.
 	MaxSessions int
+
+	// HistoryResolver, if non-nil, provides per-agent persistent history storage.
+	// Nil means no persistence (backward compatible).
+	HistoryResolver HistoryResolver
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -109,6 +113,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		Pruner:          pruner,
 		Logger:          cfg.Logger,
 		HookPipeline:    cfg.HookPipeline,
+		HistoryResolver: cfg.HistoryResolver,
 	})
 
 	return &Router{

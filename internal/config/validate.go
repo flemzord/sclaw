@@ -86,7 +86,11 @@ func validateSecurity(sec *SecurityConfig) []error {
 // for validation purposes without importing the multiagent package.
 type agentValidation struct {
 	Provider string `yaml:"provider"`
-	Routing  struct {
+	DataDir  string `yaml:"data_dir"`
+	Memory   struct {
+		Enabled *bool `yaml:"enabled"`
+	} `yaml:"memory"`
+	Routing struct {
 		Default bool `yaml:"default"`
 	} `yaml:"routing"`
 }

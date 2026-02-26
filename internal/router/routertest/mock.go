@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -126,9 +127,23 @@ func (m *MockSessionStore) Range(fn func(router.SessionKey, *router.Session) boo
 	}
 }
 
+// MockHistoryResolver provides a controllable HistoryResolver for tests.
+type MockHistoryResolver struct {
+	ResolveHistoryFunc func(agentID string) memory.HistoryStore
+}
+
+// ResolveHistory delegates to ResolveHistoryFunc if set, otherwise returns nil.
+func (m *MockHistoryResolver) ResolveHistory(agentID string) memory.HistoryStore {
+	if m.ResolveHistoryFunc != nil {
+		return m.ResolveHistoryFunc(agentID)
+	}
+	return nil
+}
+
 // Interface guards.
 var (
-	_ router.ResponseSender = (*MockResponseSender)(nil)
-	_ router.AgentFactory   = (*MockAgentFactory)(nil)
-	_ router.SessionStore   = (*MockSessionStore)(nil)
+	_ router.ResponseSender  = (*MockResponseSender)(nil)
+	_ router.AgentFactory    = (*MockAgentFactory)(nil)
+	_ router.SessionStore    = (*MockSessionStore)(nil)
+	_ router.HistoryResolver = (*MockHistoryResolver)(nil)
 )

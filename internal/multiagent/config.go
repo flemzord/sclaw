@@ -3,6 +3,8 @@ package multiagent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"gopkg.in/yaml.v3"
@@ -10,11 +12,24 @@ import (
 
 // AgentConfig holds the configuration for a single agent.
 type AgentConfig struct {
+	DataDir   string        `yaml:"data_dir"`
 	Workspace string        `yaml:"workspace"`
 	Provider  string        `yaml:"provider"`
 	Tools     []string      `yaml:"tools"`
+	Memory    MemoryConfig  `yaml:"memory"`
 	Routing   RoutingConfig `yaml:"routing"`
 	Loop      LoopOverrides `yaml:"loop"`
+}
+
+// MemoryConfig holds per-agent memory settings.
+type MemoryConfig struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+// IsEnabled returns whether memory is enabled for this agent.
+// Defaults to true when not explicitly set.
+func (c MemoryConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 // RoutingConfig defines the routing rules that determine when an agent handles a message.
@@ -49,4 +64,28 @@ func ParseAgents(nodes map[string]yaml.Node) (map[string]AgentConfig, []string, 
 	// Sort order for deterministic resolution when YAML map order is lost.
 	slices.Sort(order)
 	return agents, order, nil
+}
+
+// ResolveDefaults fills zero-valued fields with computed defaults.
+// Must be called after ParseAgents and before NewRegistry.
+func ResolveDefaults(agents map[string]AgentConfig, dataDir string) {
+	for name, cfg := range agents {
+		if cfg.DataDir == "" {
+			cfg.DataDir = filepath.Join(dataDir, "agents", name)
+		}
+		agents[name] = cfg
+	}
+}
+
+// EnsureDirectories creates the data directory for each agent.
+func EnsureDirectories(agents map[string]AgentConfig) error {
+	for name, cfg := range agents {
+		if cfg.DataDir == "" {
+			continue
+		}
+		if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
+			return fmt.Errorf("multiagent: create data dir for agent %q: %w", name, err)
+		}
+	}
+	return nil
 }

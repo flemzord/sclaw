@@ -272,3 +272,36 @@ provider: `+providerID+`
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidate_AgentsWithMemoryAndDataDir(t *testing.T) {
+	modID := t.Name() + ".mod"
+	providerID := t.Name() + ".provider"
+	registerStub(t, modID)
+	registerStub(t, providerID)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{
+			modID:      {},
+			providerID: {},
+		},
+		Agents: map[string]yaml.Node{
+			"assistant": yamlNode(t, `
+provider: `+providerID+`
+data_dir: /custom/assistant
+memory:
+  enabled: true
+routing:
+  default: true
+`),
+			"researcher": yamlNode(t, `
+provider: `+providerID+`
+memory:
+  enabled: false
+`),
+		},
+	}
+
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

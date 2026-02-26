@@ -1,15 +1,20 @@
 package multiagent
 
 import (
+	"database/sql"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
+	"github.com/flemzord/sclaw/modules/memory/sqlite"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -37,17 +42,28 @@ type FactoryConfig struct {
 }
 
 // Factory resolves the agent for a session and creates an agent.Loop
-// with the correct provider, tools, and workspace.
+// with the correct provider, tools, and workspace. It also acts as a
+// HistoryResolver, lazily opening per-agent SQLite databases.
 type Factory struct {
 	cfg FactoryConfig
+
+	mu     sync.RWMutex
+	stores map[string]memory.HistoryStore
+	dbs    []*sql.DB
 }
 
-// Compile-time check.
-var _ router.AgentFactory = (*Factory)(nil)
+// Compile-time checks.
+var (
+	_ router.AgentFactory    = (*Factory)(nil)
+	_ router.HistoryResolver = (*Factory)(nil)
+)
 
 // NewFactory creates a Factory from the given configuration.
 func NewFactory(cfg FactoryConfig) *Factory {
-	return &Factory{cfg: cfg}
+	return &Factory{
+		cfg:    cfg,
+		stores: make(map[string]memory.HistoryStore),
+	}
 }
 
 // ForSession resolves the agent for the session and builds an agent.Loop.
@@ -92,7 +108,7 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 		Registry: toolReg,
 		Env: tool.ExecutionEnv{
 			Workspace:    agentCfg.Workspace,
-			DataDir:      agentCfg.Workspace + "/data",
+			DataDir:      agentCfg.DataDir,
 			SanitizedEnv: f.cfg.SanitizedEnv,
 			URLFilter:    f.cfg.URLFilter,
 		},
@@ -133,4 +149,68 @@ func (f *Factory) buildLoopConfig(cfg AgentConfig) agent.LoopConfig {
 		}
 	}
 	return lc
+}
+
+// ResolveHistory returns the persistent HistoryStore for the given agent.
+// Returns nil if memory is disabled or the agent has no DataDir.
+// The store is lazily opened on first access and cached for subsequent calls.
+func (f *Factory) ResolveHistory(agentID string) memory.HistoryStore {
+	// Fast path: read lock.
+	f.mu.RLock()
+	if s, ok := f.stores[agentID]; ok {
+		f.mu.RUnlock()
+		return s
+	}
+	f.mu.RUnlock()
+
+	// Slow path: write lock + double-check.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if s, ok := f.stores[agentID]; ok {
+		return s
+	}
+
+	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	if !ok || !agentCfg.Memory.IsEnabled() || agentCfg.DataDir == "" {
+		// Cache nil to avoid repeated lookups.
+		f.stores[agentID] = nil
+		return nil
+	}
+
+	dbPath := filepath.Join(agentCfg.DataDir, "memory.db")
+	store, db, err := sqlite.OpenHistoryStore(dbPath)
+	if err != nil {
+		if f.cfg.Logger != nil {
+			f.cfg.Logger.Error("multiagent: failed to open history store",
+				"agent", agentID, "path", dbPath, "error", err)
+		}
+		f.stores[agentID] = nil
+		return nil
+	}
+
+	f.stores[agentID] = store
+	f.dbs = append(f.dbs, db)
+
+	if f.cfg.Logger != nil {
+		f.cfg.Logger.Info("multiagent: opened history store",
+			"agent", agentID, "path", dbPath)
+	}
+	return store
+}
+
+// Close closes all SQLite databases opened by ResolveHistory.
+func (f *Factory) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var firstErr error
+	for _, db := range f.dbs {
+		if err := db.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	f.dbs = nil
+	f.stores = make(map[string]memory.HistoryStore)
+	return firstErr
 }

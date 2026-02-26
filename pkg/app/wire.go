@@ -14,11 +14,17 @@ import (
 	"github.com/flemzord/sclaw/internal/tool"
 )
 
+// factoryCloser is implemented by multiagent.Factory to close SQLite databases.
+type factoryCloser interface {
+	Close() error
+}
+
 // routerModule wraps a *router.Router to satisfy core.Module, core.Starter,
 // and core.Stopper, so the router participates in the App lifecycle.
 type routerModule struct {
-	router *router.Router
-	ctx    context.Context
+	router  *router.Router
+	factory factoryCloser
+	ctx     context.Context
 }
 
 func (m *routerModule) ModuleInfo() core.ModuleInfo {
@@ -32,6 +38,9 @@ func (m *routerModule) Start() error {
 
 func (m *routerModule) Stop(ctx context.Context) error {
 	m.router.Stop(ctx)
+	if m.factory != nil {
+		return m.factory.Close()
+	}
 	return nil
 }
 
@@ -92,6 +101,10 @@ func wireRouter(
 				Routing:   multiagent.RoutingConfig{Default: true},
 			},
 		}
+		multiagent.ResolveDefaults(agents, appCtx.DataDir)
+		if err := multiagent.EnsureDirectories(agents); err != nil {
+			return fmt.Errorf("creating default agent directories: %w", err)
+		}
 		var err error
 		registry, err = multiagent.NewRegistry(agents, []string{"default"})
 		if err != nil {
@@ -118,11 +131,12 @@ func wireRouter(
 
 	// Create the router.
 	r, err := router.NewRouter(router.Config{
-		AgentFactory:   factory,
-		ResponseSender: dispatcher,
-		ChannelLookup:  dispatcher,
-		Logger:         logger,
-		RateLimiter:    rateLimiter,
+		AgentFactory:    factory,
+		ResponseSender:  dispatcher,
+		ChannelLookup:   dispatcher,
+		Logger:          logger,
+		RateLimiter:     rateLimiter,
+		HistoryResolver: factory,
 	})
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)
@@ -135,8 +149,9 @@ func wireRouter(
 
 	// Append the router to the app lifecycle.
 	app.AppendModule("router", &routerModule{
-		router: r,
-		ctx:    context.Background(),
+		router:  r,
+		factory: factory,
+		ctx:     context.Background(),
 	})
 
 	// Register the session store for the gateway to discover.
