@@ -26,12 +26,20 @@ type Client struct {
 }
 
 // NewClient creates a new Telegram Bot API client.
+// It does NOT set a global http.Client.Timeout because that kills long-polling
+// and SSE streams. Per-request context deadlines handle cancellation instead;
+// ResponseHeaderTimeout protects against servers that never send headers.
 func NewClient(token, baseURL string) *Client {
 	return &Client{
 		token:   token,
 		baseURL: baseURL,
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				ResponseHeaderTimeout: 60 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 		},
 	}
 }

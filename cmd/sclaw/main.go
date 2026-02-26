@@ -66,15 +66,24 @@ func startCmd() *cobra.Command {
 		Short: "Start sclaw with all configured modules",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfgPath, _ := cmd.Flags().GetString("config")
+			debug, _ := cmd.Flags().GetBool("debug")
+
+			logLevel := slog.LevelInfo
+			if debug {
+				logLevel = slog.LevelDebug
+			}
+
 			return app.Run(app.RunParams{
 				ConfigPath: cfgPath,
 				Version:    version,
 				Commit:     commit,
 				Date:       date,
+				LogLevel:   logLevel,
 			})
 		},
 	}
 	cmd.Flags().StringP("config", "c", "", "Path to configuration file")
+	cmd.Flags().Bool("debug", false, "Enable debug logging")
 	return cmd
 }
 

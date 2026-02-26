@@ -58,11 +58,23 @@ func (w *WebhookReceiver) HandleWebhook(_ context.Context, _ string, body []byte
 		return errors.New("telegram: invalid update JSON: " + err.Error())
 	}
 
+	w.logger.Debug("received webhook update", "update_id", update.UpdateID)
+
 	msg, err := convertInbound(&update, w.botUsername, w.channelName)
 	if err != nil {
 		w.logger.Debug("skipping webhook update", "update_id", update.UpdateID, "reason", err)
 		return nil
 	}
+
+	w.logger.Debug("webhook inbound message converted",
+		"update_id", update.UpdateID,
+		"msg_id", msg.ID,
+		"sender", msg.Sender.ID,
+		"sender_name", msg.Sender.DisplayName,
+		"chat_id", msg.Chat.ID,
+		"chat_type", msg.Chat.Type,
+		"blocks", len(msg.Blocks),
+	)
 
 	if !w.allowList.IsAllowed(msg) {
 		w.logger.Debug("webhook update denied by allow list",

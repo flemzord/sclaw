@@ -136,11 +136,23 @@ func (p *Poller) loop() {
 
 // handleUpdate processes a single update.
 func (p *Poller) handleUpdate(update *Update) {
+	p.logger.Debug("received update", "update_id", update.UpdateID)
+
 	msg, err := convertInbound(update, p.botUsername, p.channelName)
 	if err != nil {
 		p.logger.Debug("skipping update", "update_id", update.UpdateID, "reason", err)
 		return
 	}
+
+	p.logger.Debug("inbound message converted",
+		"update_id", update.UpdateID,
+		"msg_id", msg.ID,
+		"sender", msg.Sender.ID,
+		"sender_name", msg.Sender.DisplayName,
+		"chat_id", msg.Chat.ID,
+		"chat_type", msg.Chat.Type,
+		"blocks", len(msg.Blocks),
+	)
 
 	if !p.allowList.IsAllowed(msg) {
 		p.logger.Debug("update denied by allow list",

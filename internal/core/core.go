@@ -34,6 +34,25 @@ func NewApp(ctx *AppContext) *App {
 	}
 }
 
+// Module returns a loaded module by its ID, or false if not found.
+func (a *App) Module(id string) (Module, bool) {
+	for _, mi := range a.modules {
+		if string(mi.id) == id {
+			return mi.module, true
+		}
+	}
+	return nil, false
+}
+
+// AppendModule appends a module to the lifecycle so it receives Start/Stop calls.
+// Used for infrastructure components (like the router) that are not config-driven.
+func (a *App) AppendModule(id ModuleID, mod Module) {
+	a.modules = append(a.modules, moduleInstance{
+		id:     id,
+		module: mod,
+	})
+}
+
 // LoadModules instantiates, provisions, and validates all modules for the
 // given IDs in order. If any step fails, already-loaded modules are cleaned up.
 func (a *App) LoadModules(ids []string) error {

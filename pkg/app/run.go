@@ -146,6 +146,13 @@ func Run(params RunParams) error {
 		return err
 	}
 
+	// Wire the router between LoadModules and Start: discover channels and
+	// providers, create the dispatcher and agent factory, call SetInbox on
+	// every channel, and append the router to the app lifecycle.
+	if err := wireRouter(application, appCtx, ids, logger, auditLogger, rateLimiter); err != nil {
+		return err
+	}
+
 	// Build and register the reload handler BEFORE Start so gateway can use it.
 	handler := reload.NewHandler(application, logger, dataDir, workspace)
 	appCtx.RegisterService("reload.handler", handler)
