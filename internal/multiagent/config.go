@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +20,64 @@ type AgentConfig struct {
 	Memory    MemoryConfig  `yaml:"memory"`
 	Routing   RoutingConfig `yaml:"routing"`
 	Loop      LoopOverrides `yaml:"loop"`
+	Cron      CronConfig    `yaml:"cron"`
+}
+
+// CronConfig holds per-agent cron job settings.
+type CronConfig struct {
+	SessionCleanup   SessionCleanupCron   `yaml:"session_cleanup"`
+	MemoryExtraction MemoryExtractionCron `yaml:"memory_extraction"`
+	MemoryCompaction MemoryCompactionCron `yaml:"memory_compaction"`
+}
+
+// SessionCleanupCron configures the session cleanup job.
+type SessionCleanupCron struct {
+	Schedule string `yaml:"schedule"`
+	MaxIdle  string `yaml:"max_idle"`
+}
+
+// ScheduleOrDefault returns the schedule expression, defaulting to "*/5 * * * *".
+func (c SessionCleanupCron) ScheduleOrDefault() string {
+	if c.Schedule != "" {
+		return c.Schedule
+	}
+	return "*/5 * * * *"
+}
+
+// MaxIdleOrDefault parses MaxIdle as a time.Duration, defaulting to 30m.
+func (c SessionCleanupCron) MaxIdleOrDefault() time.Duration {
+	if c.MaxIdle != "" {
+		if d, err := time.ParseDuration(c.MaxIdle); err == nil {
+			return d
+		}
+	}
+	return 30 * time.Minute
+}
+
+// MemoryExtractionCron configures the memory extraction job.
+type MemoryExtractionCron struct {
+	Schedule string `yaml:"schedule"`
+}
+
+// ScheduleOrDefault returns the schedule expression, defaulting to "*/10 * * * *".
+func (c MemoryExtractionCron) ScheduleOrDefault() string {
+	if c.Schedule != "" {
+		return c.Schedule
+	}
+	return "*/10 * * * *"
+}
+
+// MemoryCompactionCron configures the memory compaction job.
+type MemoryCompactionCron struct {
+	Schedule string `yaml:"schedule"`
+}
+
+// ScheduleOrDefault returns the schedule expression, defaulting to "0 * * * *".
+func (c MemoryCompactionCron) ScheduleOrDefault() string {
+	if c.Schedule != "" {
+		return c.Schedule
+	}
+	return "0 * * * *"
 }
 
 // MemoryConfig holds per-agent memory settings.

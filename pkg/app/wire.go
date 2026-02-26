@@ -13,6 +13,7 @@ import (
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
+	"github.com/flemzord/sclaw/internal/subagent"
 	"github.com/flemzord/sclaw/internal/tool"
 )
 
@@ -24,9 +25,10 @@ type factoryCloser interface {
 // routerModule wraps a *router.Router to satisfy core.Module, core.Starter,
 // and core.Stopper, so the router participates in the App lifecycle.
 type routerModule struct {
-	router  *router.Router
-	factory factoryCloser
-	ctx     context.Context
+	router      *router.Router
+	factory     factoryCloser
+	subagentMgr *subagent.Manager
+	ctx         context.Context
 }
 
 func (m *routerModule) ModuleInfo() core.ModuleInfo {
@@ -40,6 +42,9 @@ func (m *routerModule) Start() error {
 
 func (m *routerModule) Stop(ctx context.Context) error {
 	m.router.Stop(ctx)
+	if m.subagentMgr != nil {
+		m.subagentMgr.Shutdown(ctx)
+	}
 	if m.factory != nil {
 		return m.factory.Close()
 	}
@@ -131,6 +136,14 @@ func wireRouter(
 		URLFilter:       urlFilter,
 	})
 
+	// Create sub-agent manager and wire it into the factory.
+	loopFactory := multiagent.NewSubAgentLoopFactory(defaultProvider, factory.GlobalTools())
+	subMgr := subagent.NewManager(subagent.ManagerConfig{
+		Logger:      logger,
+		LoopFactory: loopFactory,
+	})
+	factory.SetSubAgentManager(subMgr)
+
 	// Create the router.
 	r, err := router.NewRouter(router.Config{
 		AgentFactory:    factory,
@@ -152,9 +165,10 @@ func wireRouter(
 
 	// Append the router to the app lifecycle.
 	app.AppendModule("router", &routerModule{
-		router:  r,
-		factory: factory,
-		ctx:     context.Background(),
+		router:      r,
+		factory:     factory,
+		subagentMgr: subMgr,
+		ctx:         context.Background(),
 	})
 
 	// Register the session store for the gateway to discover.
@@ -185,6 +199,10 @@ func (m *schedulerModule) Stop(ctx context.Context) error {
 // wireCron creates the cron Scheduler, registers background jobs, and appends
 // the scheduler to the app lifecycle. Must be called after wireRouter (needs
 // "router.sessions") and before Start.
+//
+// When a multiagent registry is available, jobs are registered per-agent using
+// each agent's CronConfig. Otherwise, global jobs with defaults are registered
+// for single-agent setups.
 func wireCron(
 	app *core.App,
 	appCtx *core.AppContext,
@@ -192,25 +210,70 @@ func wireCron(
 ) error {
 	s := cron.NewScheduler(logger)
 
-	// Wire session cleanup if the router registered a session store.
+	// Resolve the session store (optional — only available when the router is wired).
+	var sessionStore cron.SessionStore
 	if svc, ok := appCtx.GetService("router.sessions"); ok {
-		if store, ok := svc.(cron.SessionStore); ok {
+		sessionStore, _ = svc.(cron.SessionStore)
+	}
+
+	// Resolve multiagent registry for per-agent job configuration.
+	var registry *multiagent.Registry
+	if svc, ok := appCtx.GetService("multiagent.registry"); ok {
+		registry, _ = svc.(*multiagent.Registry)
+	}
+
+	if registry != nil {
+		// Per-agent jobs: one set of jobs per registered agent.
+		for _, agentID := range registry.AgentIDs() {
+			cfg, _ := registry.AgentConfig(agentID)
+			cronCfg := cfg.Cron
+
+			if sessionStore != nil {
+				if err := s.RegisterJob(&cron.SessionCleanupJob{
+					Store:        sessionStore,
+					MaxIdle:      cronCfg.SessionCleanup.MaxIdleOrDefault(),
+					Logger:       logger,
+					AgentID:      agentID,
+					ScheduleExpr: cronCfg.SessionCleanup.ScheduleOrDefault(),
+				}); err != nil {
+					return fmt.Errorf("cron: registering session cleanup for agent %s: %w", agentID, err)
+				}
+			}
+
+			if err := s.RegisterJob(&cron.MemoryExtractionJob{
+				Logger:       logger,
+				AgentID:      agentID,
+				ScheduleExpr: cronCfg.MemoryExtraction.ScheduleOrDefault(),
+			}); err != nil {
+				return fmt.Errorf("cron: registering memory extraction for agent %s: %w", agentID, err)
+			}
+
+			if err := s.RegisterJob(&cron.MemoryCompactionJob{
+				Logger:       logger,
+				AgentID:      agentID,
+				ScheduleExpr: cronCfg.MemoryCompaction.ScheduleOrDefault(),
+			}); err != nil {
+				return fmt.Errorf("cron: registering memory compaction for agent %s: %w", agentID, err)
+			}
+		}
+	} else {
+		// Single-agent fallback: global jobs with defaults.
+		if sessionStore != nil {
 			if err := s.RegisterJob(&cron.SessionCleanupJob{
-				Store:   store,
+				Store:   sessionStore,
 				MaxIdle: 30 * time.Minute,
 				Logger:  logger,
 			}); err != nil {
 				return fmt.Errorf("cron: registering session cleanup: %w", err)
 			}
 		}
-	}
 
-	// Register stub memory jobs (no-op until the memory subsystem is fully wired).
-	if err := s.RegisterJob(&cron.MemoryExtractionJob{Logger: logger}); err != nil {
-		return fmt.Errorf("cron: registering memory extraction: %w", err)
-	}
-	if err := s.RegisterJob(&cron.MemoryCompactionJob{Logger: logger}); err != nil {
-		return fmt.Errorf("cron: registering memory compaction: %w", err)
+		if err := s.RegisterJob(&cron.MemoryExtractionJob{Logger: logger}); err != nil {
+			return fmt.Errorf("cron: registering memory extraction: %w", err)
+		}
+		if err := s.RegisterJob(&cron.MemoryCompactionJob{Logger: logger}); err != nil {
+			return fmt.Errorf("cron: registering memory compaction: %w", err)
+		}
 	}
 
 	app.AppendModule("cron", &schedulerModule{scheduler: s})

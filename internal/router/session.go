@@ -58,6 +58,10 @@ type SessionStore interface {
 	// and returns the number of sessions pruned.
 	Prune(maxIdle time.Duration) int
 
+	// PruneByAgent removes sessions for a specific agent that have been
+	// idle longer than maxIdle and returns the number of sessions pruned.
+	PruneByAgent(agentID string, maxIdle time.Duration) int
+
 	// Len returns the number of active sessions.
 	Len() int
 

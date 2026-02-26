@@ -120,6 +120,26 @@ func (s *InMemorySessionStore) Prune(maxIdle time.Duration) int {
 	return pruned
 }
 
+// PruneByAgent removes sessions for a specific agent whose idle time exceeds
+// maxIdle and returns the number of sessions pruned.
+func (s *InMemorySessionStore) PruneByAgent(agentID string, maxIdle time.Duration) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	pruned := 0
+	for key, sess := range s.sessions {
+		if sess.AgentID != agentID {
+			continue
+		}
+		if now.Sub(sess.LastActiveAt) > maxIdle {
+			delete(s.sessions, key)
+			pruned++
+		}
+	}
+	return pruned
+}
+
 // Len returns the number of active sessions.
 func (s *InMemorySessionStore) Len() int {
 	s.mu.RLock()

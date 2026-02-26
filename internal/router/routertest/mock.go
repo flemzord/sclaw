@@ -65,13 +65,14 @@ func (m *MockAgentFactory) ForSession(session *router.Session, msg message.Inbou
 
 // MockSessionStore provides controllable session store behavior for tests.
 type MockSessionStore struct {
-	GetOrCreateFunc func(key router.SessionKey) (*router.Session, bool)
-	GetFunc         func(key router.SessionKey) *router.Session
-	TouchFunc       func(key router.SessionKey)
-	DeleteFunc      func(key router.SessionKey)
-	PruneFunc       func(maxIdle time.Duration) int
-	LenFunc         func() int
-	RangeFunc       func(fn func(router.SessionKey, *router.Session) bool)
+	GetOrCreateFunc  func(key router.SessionKey) (*router.Session, bool)
+	GetFunc          func(key router.SessionKey) *router.Session
+	TouchFunc        func(key router.SessionKey)
+	DeleteFunc       func(key router.SessionKey)
+	PruneFunc        func(maxIdle time.Duration) int
+	PruneByAgentFunc func(agentID string, maxIdle time.Duration) int
+	LenFunc          func() int
+	RangeFunc        func(fn func(router.SessionKey, *router.Session) bool)
 }
 
 // GetOrCreate delegates to GetOrCreateFunc if set, otherwise returns a default session.
@@ -108,6 +109,14 @@ func (m *MockSessionStore) Delete(key router.SessionKey) {
 func (m *MockSessionStore) Prune(maxIdle time.Duration) int {
 	if m.PruneFunc != nil {
 		return m.PruneFunc(maxIdle)
+	}
+	return 0
+}
+
+// PruneByAgent delegates to PruneByAgentFunc if set, otherwise returns 0.
+func (m *MockSessionStore) PruneByAgent(agentID string, maxIdle time.Duration) int {
+	if m.PruneByAgentFunc != nil {
+		return m.PruneByAgentFunc(agentID, maxIdle)
 	}
 	return 0
 }
