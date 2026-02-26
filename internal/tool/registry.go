@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/flemzord/sclaw/internal/security"
 )
@@ -249,9 +250,15 @@ const maxAuditDetailLen = 4096
 
 // truncateForAudit truncates a string to maxAuditDetailLen, appending
 // a truncation indicator if the string was shortened.
+// It walks back to a valid UTF-8 rune boundary to avoid splitting multi-byte
+// characters when the cut falls mid-rune.
 func truncateForAudit(s string) string {
 	if len(s) <= maxAuditDetailLen {
 		return s
 	}
-	return s[:maxAuditDetailLen] + "...(truncated)"
+	i := maxAuditDetailLen
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return s[:i] + "...(truncated)"
 }

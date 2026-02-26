@@ -37,6 +37,9 @@ type Config struct {
 	// MaxMessageSize is the maximum allowed message size in bytes.
 	// Zero means use the default (1 MiB).
 	MaxMessageSize int
+
+	// MaxSessions limits the number of concurrent sessions. Zero means unlimited.
+	MaxSessions int
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -87,8 +90,8 @@ func NewRouter(cfg Config) (*Router, error) {
 	}
 
 	store := NewInMemorySessionStore()
-	if cfg.RateLimiter != nil {
-		store.SetMaxSessions(cfg.RateLimiter.MaxSessions())
+	if cfg.MaxSessions > 0 {
+		store.SetMaxSessions(cfg.MaxSessions)
 	}
 	laneLock := NewLaneLock()
 	approvalMgr := NewApprovalManager()
@@ -176,6 +179,9 @@ func (r *Router) Submit(msg message.InboundMessage) error {
 	}
 
 	// Rate limit check for messages.
+	// TODO: Current rate limiting is global (all users share one bucket).
+	// Consider implementing per-session or per-user rate limiting to prevent
+	// a single user from exhausting the quota for all others.
 	if r.config.RateLimiter != nil {
 		if err := r.config.RateLimiter.Allow("message"); err != nil {
 			r.logger.Warn("router: message rate limited",

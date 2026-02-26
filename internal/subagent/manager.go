@@ -49,7 +49,7 @@ func (c ManagerConfig) withDefaults() ManagerConfig {
 		c.MaxHistory = 50
 	}
 	if c.Logger == nil {
-		c.Logger = slog.New(slog.NewTextHandler(nil, nil))
+		c.Logger = slog.Default()
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -92,6 +92,12 @@ var ErrCrossSession = errors.New("subagent: cross-session spawn not allowed")
 func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (string, error) {
 	if req.IsSubAgent {
 		return "", ErrRecursiveSpawn
+	}
+
+	if req.SessionID == "" {
+		m.cfg.Logger.Warn("subagent: spawn without SessionID, cross-session validation disabled",
+			"parent_id", req.ParentID,
+		)
 	}
 
 	m.mu.Lock()

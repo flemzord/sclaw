@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type registryTestTool struct {
@@ -379,5 +381,48 @@ func TestRegistryExecute_ContextAwarePolicy(t *testing.T) {
 	}
 	if dmCalls != 1 {
 		t.Fatalf("group should not execute, calls = %d", dmCalls)
+	}
+}
+
+// TestTruncateForAudit_UTF8Safety verifies that truncateForAudit does not split
+// a multi-byte UTF-8 character at the truncation boundary.
+func TestTruncateForAudit_UTF8Safety(t *testing.T) {
+	t.Parallel()
+
+	// Build a string that is just under the limit: fill with ASCII up to
+	// maxAuditDetailLen-1, then append a 3-byte UTF-8 rune (U+4E16, '世').
+	// The byte at index maxAuditDetailLen is a continuation byte — a naive
+	// s[:maxAuditDetailLen] would produce invalid UTF-8.
+	prefix := strings.Repeat("a", maxAuditDetailLen-1)
+	multiByteRune := "世" // 3 bytes: 0xE4 0xB8 0x96
+	s := prefix + multiByteRune + strings.Repeat("b", 10)
+
+	result := truncateForAudit(s)
+
+	// Result must be valid UTF-8.
+	if !utf8.ValidString(result) {
+		t.Errorf("truncateForAudit produced invalid UTF-8: %q", result)
+	}
+
+	// Result must end with the truncation marker.
+	if !strings.HasSuffix(result, "...(truncated)") {
+		t.Errorf("truncateForAudit result missing truncation marker: %q", result)
+	}
+
+	// The multi-byte rune must not be present (it was split off).
+	// The prefix (maxAuditDetailLen-1 ASCII bytes) must be fully present.
+	if !strings.HasPrefix(result, prefix) {
+		t.Errorf("truncateForAudit dropped part of the prefix")
+	}
+}
+
+// TestTruncateForAudit_ShortString verifies that strings within the limit
+// are returned unchanged.
+func TestTruncateForAudit_ShortString(t *testing.T) {
+	t.Parallel()
+
+	s := "short string"
+	if got := truncateForAudit(s); got != s {
+		t.Errorf("truncateForAudit(%q) = %q, want unchanged", s, got)
 	}
 }

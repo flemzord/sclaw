@@ -128,23 +128,45 @@ func Run(params RunParams) error {
 		logger.Info("multi-agent mode enabled", "agents", len(agents))
 	}
 
+	// Register the config path so modules (e.g. the gateway) can discover it.
+	appCtx.RegisterService("config.path", cfgPath)
+
+	// Build and register URL filter if configured.
+	if cfg.Security != nil && len(cfg.Security.URLFilter.AllowDomains) > 0 {
+		urlFilter := security.NewURLFilter(security.URLFilterConfig{
+			AllowDomains: cfg.Security.URLFilter.AllowDomains,
+			DenyDomains:  cfg.Security.URLFilter.DenyDomains,
+		})
+		appCtx.RegisterService("security.urlfilter", urlFilter)
+	}
+
 	application := core.NewApp(appCtx)
 	ids := config.Resolve(cfg)
 	if err := application.LoadModules(ids); err != nil {
 		return err
 	}
 
+	// Build and register the reload handler BEFORE Start so gateway can use it.
+	handler := reload.NewHandler(application, logger, dataDir, workspace)
+	appCtx.RegisterService("reload.handler", handler)
+
 	if err := application.Start(); err != nil {
 		return err
 	}
+
+	// Sync the redactor with all credentials registered by modules during Start.
+	// This ensures runtime secrets (e.g. API keys loaded from env by modules)
+	// are redacted from logs going forward.
+	redactor.SyncCredentials(credStore)
+
+	// Build sanitized environment after modules have registered their credentials,
+	// and make it available for tool execution via service lookup.
+	appCtx.RegisterService("security.sanitized_env", security.SanitizedEnv(credStore))
 
 	// --- signal handling ---
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigCh)
-
-	// --- reload handler ---
-	handler := reload.NewHandler(application, logger, dataDir, workspace)
 
 	// --- file watcher ---
 	watcher := reload.NewWatcher(reload.WatcherConfig{

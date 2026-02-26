@@ -7,6 +7,7 @@ import (
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -26,6 +27,11 @@ type PipelineConfig struct {
 	Pruner          *lazyPruner
 	HookPipeline    *hook.Pipeline
 	Logger          *slog.Logger
+
+	// AuditLogger, if non-nil, emits session lifecycle events (session_create).
+	// session_delete events are emitted by the admin handler.
+	// TODO: wire session_delete audit events from the admin handler.
+	AuditLogger *security.AuditLogger
 
 	// MaxHistoryLen caps the number of LLM messages kept in a session's
 	// history. When exceeded, the oldest entries are trimmed. Zero means
@@ -80,6 +86,14 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 	if created {
 		logger.Info("pipeline: new session created", "session_id", session.ID)
+		if p.cfg.AuditLogger != nil {
+			p.cfg.AuditLogger.Log(security.AuditEvent{
+				Type:      security.EventSessionCreate,
+				SessionID: session.ID,
+				Channel:   env.Key.Channel,
+				ChatID:    env.Key.ChatID,
+			})
+		}
 	}
 
 	// Step 3: Approval interception — safety net.
