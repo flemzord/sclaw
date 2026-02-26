@@ -180,6 +180,39 @@ func TestRedactor_RedactMap(t *testing.T) {
 	}
 }
 
+func TestRedactMap_NestedMapUnderSecretKey(t *testing.T) {
+	t.Parallel()
+
+	r := NewRedactor()
+
+	// A secret-named key whose value is a nested map should NOT be skipped
+	// entirely — the nested map must be recursively walked. Keys inside the
+	// nested map that match secretKeyPattern (e.g. "password") are redacted;
+	// safe keys (e.g. "user") are left intact.
+	m := map[string]any{
+		"credentials": map[string]any{
+			"user":     "admin",
+			"password": "secret",
+		},
+	}
+
+	r.RedactMap(m)
+
+	inner, ok := m["credentials"].(map[string]any)
+	if !ok {
+		t.Fatal("expected credentials to remain a map after RedactMap")
+	}
+	// "password" matches secretKeyPattern so it must be redacted.
+	if inner["password"] != RedactPlaceholder {
+		t.Errorf("credentials.password = %v, want redacted", inner["password"])
+	}
+	// "user" does not match secretKeyPattern and has no literal secret value,
+	// so it must remain intact.
+	if inner["user"] != "admin" {
+		t.Errorf("credentials.user = %v, want admin", inner["user"])
+	}
+}
+
 func TestRedactor_AddPattern(t *testing.T) {
 	t.Parallel()
 

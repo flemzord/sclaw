@@ -92,8 +92,9 @@ func (r *Redactor) RedactMap(m map[string]any) {
 		if secretKeyPattern.MatchString(k) {
 			if s, ok := v.(string); ok && s != "" {
 				m[k] = RedactPlaceholder
+				continue
 			}
-			continue
+			// Fall through to handle nested maps/slices under secret-named keys.
 		}
 		switch val := v.(type) {
 		case map[string]any:
