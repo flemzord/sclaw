@@ -117,7 +117,7 @@ func TestRedactor_RedactMap(t *testing.T) {
 		"name":      "test",
 		"api_key":   "should-be-redacted",
 		"password":  "hunter2",
-		"token":     "bearer-value",
+		"token":     "fake-test-value", //nolint:gosec // not a real token
 		"secret":    "top-secret",
 		"data":      "has literal-secret inside",
 		"empty_key": "",

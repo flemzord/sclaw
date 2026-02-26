@@ -87,6 +87,9 @@ func NewRouter(cfg Config) (*Router, error) {
 	}
 
 	store := NewInMemorySessionStore()
+	if cfg.RateLimiter != nil {
+		store.SetMaxSessions(cfg.RateLimiter.MaxSessions())
+	}
 	laneLock := NewLaneLock()
 	approvalMgr := NewApprovalManager()
 	pruner := newLazyPruner(store, laneLock, cfg.MaxIdle)

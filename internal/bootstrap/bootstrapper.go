@@ -76,12 +76,21 @@ func (b *Bootstrapper) Rebuild(ctx context.Context, plugins []string) (string, e
 // ReExec replaces the current process with the binary at binaryPath.
 // On success this function never returns. Uses syscall.Exec (Unix only).
 //
+// Security: ReExec is only reachable from the internal reload path
+// (reloadOrRebuild → Bootstrapper.Rebuild → ReExec). The binaryPath
+// argument is always produced by Rebuild(), which writes to a fixed
+// location (b.binaryPath). No user/network input can influence it.
+//
 // Design: ReExec passes the full environment because the new process is
 // the same binary with the same trust level (self-to-self replacement).
 // Credential env vars (OPENAI_API_KEY, etc.) are intentionally preserved
 // so the new process can start without config-loading failures.
 // Use security.SanitizedEnv() only for untrusted subprocesses (tools, plugins).
 func (b *Bootstrapper) ReExec(binaryPath string) error {
-	//nolint:gosec // binaryPath is controlled by the bootstrapper, not user input.
+	// Guard: only accept the expected binary path to prevent misuse.
+	if binaryPath != b.binaryPath {
+		return fmt.Errorf("bootstrap: ReExec called with unexpected path %q (expected %q)", binaryPath, b.binaryPath)
+	}
+	//nolint:gosec // binaryPath is validated above and controlled by the bootstrapper.
 	return syscall.Exec(binaryPath, os.Args, os.Environ())
 }
