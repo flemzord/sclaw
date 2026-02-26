@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/core"
+	"github.com/flemzord/sclaw/internal/cron"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
@@ -159,5 +161,59 @@ func wireRouter(
 	appCtx.RegisterService("router.sessions", r.Sessions())
 
 	logger.Info("router: wired", "channels", len(channels))
+	return nil
+}
+
+// schedulerModule wraps a *cron.Scheduler to satisfy core.Module, core.Starter,
+// and core.Stopper, so the scheduler participates in the App lifecycle.
+type schedulerModule struct {
+	scheduler *cron.Scheduler
+}
+
+func (m *schedulerModule) ModuleInfo() core.ModuleInfo {
+	return core.ModuleInfo{ID: "cron"}
+}
+
+func (m *schedulerModule) Start() error {
+	return m.scheduler.Start()
+}
+
+func (m *schedulerModule) Stop(ctx context.Context) error {
+	return m.scheduler.Stop(ctx)
+}
+
+// wireCron creates the cron Scheduler, registers background jobs, and appends
+// the scheduler to the app lifecycle. Must be called after wireRouter (needs
+// "router.sessions") and before Start.
+func wireCron(
+	app *core.App,
+	appCtx *core.AppContext,
+	logger *slog.Logger,
+) error {
+	s := cron.NewScheduler(logger)
+
+	// Wire session cleanup if the router registered a session store.
+	if svc, ok := appCtx.GetService("router.sessions"); ok {
+		if store, ok := svc.(cron.SessionStore); ok {
+			if err := s.RegisterJob(&cron.SessionCleanupJob{
+				Store:   store,
+				MaxIdle: 30 * time.Minute,
+				Logger:  logger,
+			}); err != nil {
+				return fmt.Errorf("cron: registering session cleanup: %w", err)
+			}
+		}
+	}
+
+	// Register stub memory jobs (no-op until the memory subsystem is fully wired).
+	if err := s.RegisterJob(&cron.MemoryExtractionJob{Logger: logger}); err != nil {
+		return fmt.Errorf("cron: registering memory extraction: %w", err)
+	}
+	if err := s.RegisterJob(&cron.MemoryCompactionJob{Logger: logger}); err != nil {
+		return fmt.Errorf("cron: registering memory compaction: %w", err)
+	}
+
+	app.AppendModule("cron", &schedulerModule{scheduler: s})
+	logger.Info("cron: wired")
 	return nil
 }
