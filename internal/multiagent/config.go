@@ -111,7 +111,7 @@ type LoopOverrides struct {
 // It also returns the keys in declaration order (YAML map iteration order).
 func ParseAgents(nodes map[string]yaml.Node) (map[string]AgentConfig, []string, error) {
 	agents := make(map[string]AgentConfig, len(nodes))
-	var order []string
+	order := make([]string, 0, len(nodes))
 	for id, node := range nodes {
 		var cfg AgentConfig
 		if err := node.Decode(&cfg); err != nil {

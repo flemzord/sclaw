@@ -54,10 +54,16 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 
 		switch block.Type {
 		case message.BlockText:
+			text := block.Text
+			pm := parseMode
+			if pm == "" {
+				text = FormatMarkdownV2(text)
+				pm = "MarkdownV2"
+			}
 			_, err = t.client.SendMessage(ctx, SendMessageRequest{
 				ChatID:                chatID,
-				Text:                  block.Text,
-				ParseMode:             parseMode,
+				Text:                  text,
+				ParseMode:             pm,
 				MessageThreadID:       threadID,
 				ReplyToMessageID:      replyToID,
 				DisableWebPagePreview: disablePreview,
@@ -65,23 +71,35 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 			})
 
 		case message.BlockImage:
+			caption := block.Caption
+			pm := parseMode
+			if pm == "" && caption != "" {
+				caption = FormatMarkdownV2(caption)
+				pm = "MarkdownV2"
+			}
 			_, err = t.client.SendPhoto(ctx, SendPhotoRequest{
 				ChatID:              chatID,
 				Photo:               block.URL,
-				Caption:             block.Caption,
-				ParseMode:           parseMode,
+				Caption:             caption,
+				ParseMode:           pm,
 				MessageThreadID:     threadID,
 				ReplyToMessageID:    replyToID,
 				DisableNotification: disableNotification,
 			})
 
 		case message.BlockAudio:
+			caption := block.Caption
+			pm := parseMode
+			if pm == "" && caption != "" {
+				caption = FormatMarkdownV2(caption)
+				pm = "MarkdownV2"
+			}
 			if block.IsVoice {
 				_, err = t.client.SendVoice(ctx, SendVoiceRequest{
 					ChatID:              chatID,
 					Voice:               block.URL,
-					Caption:             block.Caption,
-					ParseMode:           parseMode,
+					Caption:             caption,
+					ParseMode:           pm,
 					MessageThreadID:     threadID,
 					ReplyToMessageID:    replyToID,
 					DisableNotification: disableNotification,
@@ -90,8 +108,8 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 				_, err = t.client.SendAudio(ctx, SendAudioRequest{
 					ChatID:              chatID,
 					Audio:               block.URL,
-					Caption:             block.Caption,
-					ParseMode:           parseMode,
+					Caption:             caption,
+					ParseMode:           pm,
 					MessageThreadID:     threadID,
 					ReplyToMessageID:    replyToID,
 					DisableNotification: disableNotification,
@@ -99,11 +117,17 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 			}
 
 		case message.BlockFile:
+			caption := block.Caption
+			pm := parseMode
+			if pm == "" && caption != "" {
+				caption = FormatMarkdownV2(caption)
+				pm = "MarkdownV2"
+			}
 			_, err = t.client.SendDocument(ctx, SendDocumentRequest{
 				ChatID:              chatID,
 				Document:            block.URL,
-				Caption:             block.Caption,
-				ParseMode:           parseMode,
+				Caption:             caption,
+				ParseMode:           pm,
 				MessageThreadID:     threadID,
 				ReplyToMessageID:    replyToID,
 				DisableNotification: disableNotification,

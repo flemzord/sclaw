@@ -69,8 +69,8 @@ func parseExtractedFacts(response string, exchange Exchange) []Fact {
 		return nil
 	}
 
-	var facts []Fact
 	lines := splitLines(response)
+	facts := make([]Fact, 0, len(lines))
 	now := time.Now()
 
 	for i, line := range lines {

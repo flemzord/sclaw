@@ -90,7 +90,7 @@ func LoadSkillsFromDir(dir string) ([]Skill, error) {
 		return nil, err
 	}
 
-	var skills []Skill
+	skills := make([]Skill, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
