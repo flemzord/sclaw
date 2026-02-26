@@ -9,8 +9,12 @@ import (
 	"net/http"
 
 	"github.com/flemzord/sclaw/internal/channel"
+	"github.com/flemzord/sclaw/internal/gateway"
 	"github.com/flemzord/sclaw/pkg/message"
 )
+
+// Compile-time interface guard.
+var _ gateway.WebhookHandler = (*WebhookReceiver)(nil)
 
 // WebhookReceiver processes incoming Telegram webhook payloads.
 // It implements gateway.WebhookHandler.
