@@ -95,6 +95,35 @@ func TestCredentialStore_Values(t *testing.T) {
 	}
 }
 
+func TestCredentialStore_Delete(t *testing.T) {
+	t.Parallel()
+
+	store := NewCredentialStore()
+	store.Set("key1", "val1")
+	store.Set("key2", "val2")
+
+	// Delete an existing key.
+	store.Delete("key1")
+	if store.Has("key1") {
+		t.Error("expected key1 to be deleted")
+	}
+	if store.Len() != 1 {
+		t.Errorf("Len() = %d, want 1 after delete", store.Len())
+	}
+
+	// Delete a non-existent key is a no-op.
+	store.Delete("nonexistent")
+	if store.Len() != 1 {
+		t.Errorf("Len() = %d, want 1 after no-op delete", store.Len())
+	}
+
+	// Remaining key should still be accessible.
+	val, ok := store.Get("key2")
+	if !ok || val != "val2" {
+		t.Errorf("Get(key2) = %q, %v; want val2, true", val, ok)
+	}
+}
+
 func TestCredentialStore_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 

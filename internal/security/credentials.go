@@ -78,6 +78,13 @@ func (s *CredentialStore) Values() []string {
 	return values
 }
 
+// Delete removes a credential by name. It is a no-op if the credential does not exist.
+func (s *CredentialStore) Delete(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.creds, name)
+}
+
 // Len returns the number of stored credentials.
 func (s *CredentialStore) Len() int {
 	s.mu.RLock()

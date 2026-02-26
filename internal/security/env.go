@@ -10,34 +10,31 @@ import (
 
 // sensitiveEnvPrefixes are environment variable prefixes that are stripped
 // from subprocess environments to prevent secret leakage.
+// Entries here cover all variables with these prefixes; for variables that
+// require exact matching only, see sensitiveEnvExact.
 var sensitiveEnvPrefixes = []string{
 	"OPENAI_",
 	"ANTHROPIC_",
 	"AWS_SECRET",
 	"AWS_SESSION_TOKEN",
-	"GITHUB_TOKEN",
-	"GH_TOKEN",
-	"GITLAB_TOKEN",
 	"SLACK_TOKEN",
 	"SLACK_BOT_TOKEN",
 	"DISCORD_TOKEN",
 	"TELEGRAM_BOT_TOKEN",
-	"DATABASE_URL",
-	"DB_PASSWORD",
-	"REDIS_PASSWORD",
+	"GITHUB_TOKEN",
+	"GH_TOKEN",
+	"GITLAB_TOKEN",
 	"SMTP_PASSWORD",
 }
 
 // sensitiveEnvExact are environment variable names that are stripped exactly.
+// DATABASE_URL and DB_PASSWORD are exact-only to avoid over-blocking variables
+// like DB_PORT or DATABASE_HOST which share the same prefix.
 var sensitiveEnvExact = map[string]struct{}{
 	"AWS_SECRET_ACCESS_KEY": {},
-	"GITHUB_TOKEN":          {},
-	"GH_TOKEN":              {},
-	"GITLAB_TOKEN":          {},
-	"SLACK_TOKEN":           {},
-	"SLACK_BOT_TOKEN":       {},
-	"DISCORD_TOKEN":         {},
-	"TELEGRAM_BOT_TOKEN":    {},
+	"DATABASE_URL":          {},
+	"DB_PASSWORD":           {},
+	"REDIS_PASSWORD":        {},
 }
 
 // SanitizedEnv returns a copy of os.Environ() with sensitive environment
@@ -63,9 +60,11 @@ func SanitizedEnv(store *CredentialStore) []string {
 		}
 
 		// Redact credential values that might appear in remaining vars.
+		// Only redact secrets of at least 8 characters to avoid false positives
+		// from short values (e.g., "yes", "true", single letters).
 		sanitized := entry
 		for _, secret := range secrets {
-			if secret != "" && strings.Contains(sanitized, secret) {
+			if secret != "" && len(secret) >= 8 && strings.Contains(sanitized, secret) {
 				sanitized = strings.ReplaceAll(sanitized, secret, RedactPlaceholder)
 			}
 		}
@@ -94,28 +93,34 @@ func isSensitiveEnvVar(name string) bool {
 	return false
 }
 
-// ErrProcAccess is returned when an attempt to access /proc is detected.
-var ErrProcAccess = errors.New("access to /proc is not allowed")
+// ErrRestrictedPath is returned when an attempt to access a restricted
+// system path (/proc, /sys, /dev) is detected.
+var ErrRestrictedPath = errors.New("access to restricted path is not allowed")
 
 // ValidatePath checks that a filesystem path does not access sensitive
-// system resources like /proc/self/environ which could leak secrets.
-// The path is cleaned and normalized before checking to prevent bypasses
-// via relative paths or directory traversal (e.g., "../proc/self/environ").
+// system resources like /proc, /sys, or /dev which could leak secrets or
+// allow device manipulation. The path is resolved to an absolute path and
+// symlinks are followed (best-effort) before checking to prevent bypasses.
 func ValidatePath(path string) error {
-	// Clean to resolve "..", ".", and redundant slashes before checking.
 	cleaned := filepath.Clean(path)
+	// Convert to absolute to catch relative paths like "proc/self/environ".
+	abs, err := filepath.Abs(cleaned)
+	if err == nil {
+		cleaned = abs
+	}
+	// Resolve symlinks to prevent bypass via symlink traversal.
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err == nil {
+		cleaned = resolved
+	}
 	normalized := strings.ToLower(cleaned)
 
-	// Block /proc/*/environ and /proc/self/* entirely.
-	if strings.HasPrefix(normalized, "/proc/") {
-		if strings.Contains(normalized, "/environ") {
-			return fmt.Errorf("%w: %s", ErrProcAccess, path)
-		}
-		if strings.Contains(normalized, "/self/") {
-			return fmt.Errorf("%w: %s (self access blocked)", ErrProcAccess, path)
+	blockedPrefixes := []string{"/proc/", "/sys/", "/dev/"}
+	for _, prefix := range blockedPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return fmt.Errorf("%w: %s", ErrRestrictedPath, path)
 		}
 	}
-
 	return nil
 }
 
