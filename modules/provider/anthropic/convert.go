@@ -126,11 +126,11 @@ func convertAssistantMessage(msg provider.LLMMessage) sdkanthropic.MessageParam 
 	for _, tc := range msg.ToolCalls {
 		// Pass raw JSON directly — json.RawMessage implements json.Marshaler
 		// so the SDK will serialize it correctly without double-encoding.
-		input := any(tc.Arguments)
-		if len(tc.Arguments) == 0 {
-			input = json.RawMessage("{}")
+		args := tc.Arguments
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
 		}
-		blocks = append(blocks, sdkanthropic.NewToolUseBlock(tc.ID, input, tc.Name))
+		blocks = append(blocks, sdkanthropic.NewToolUseBlock(tc.ID, args, tc.Name))
 	}
 
 	return sdkanthropic.NewAssistantMessage(blocks...)
@@ -199,6 +199,9 @@ func convertResponse(msg *sdkanthropic.Message) provider.CompletionResponse {
 	for _, block := range msg.Content {
 		switch v := block.AsAny().(type) {
 		case sdkanthropic.TextBlock:
+			// Multiple text blocks are joined with newline. This mirrors
+			// how chat UIs typically render separate text blocks and keeps
+			// the CompletionResponse.Content as a single string.
 			if content != "" {
 				content += "\n"
 			}
