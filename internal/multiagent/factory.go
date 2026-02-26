@@ -13,6 +13,7 @@ import (
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
+	"github.com/flemzord/sclaw/internal/subagent"
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/modules/memory/sqlite"
@@ -48,6 +49,8 @@ type FactoryConfig struct {
 type Factory struct {
 	cfg FactoryConfig
 
+	subAgentMgr *subagent.Manager
+
 	mu     sync.RWMutex
 	stores map[string]memory.HistoryStore
 	souls  map[string]workspace.SoulProvider
@@ -68,6 +71,19 @@ func NewFactory(cfg FactoryConfig) *Factory {
 		stores: make(map[string]memory.HistoryStore),
 		souls:  make(map[string]workspace.SoulProvider),
 	}
+}
+
+// SetSubAgentManager sets the sub-agent manager on the factory.
+// This uses a setter to break the circular dependency: Factory needs Manager
+// for tool registration, but Manager needs a LoopFactory that uses the provider
+// owned by Factory.
+func (f *Factory) SetSubAgentManager(mgr *subagent.Manager) {
+	f.subAgentMgr = mgr
+}
+
+// GlobalTools returns the global tool registry.
+func (f *Factory) GlobalTools() *tool.Registry {
+	return f.cfg.GlobalTools
 }
 
 // ForSession resolves the agent for the session and builds an agent.Loop.
@@ -97,6 +113,13 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 
 	// Build tool registry (filtered or global).
 	toolReg := f.buildToolRegistry(agentCfg)
+
+	// Register sub-agent tools so the session can spawn/manage sub-agents.
+	if f.subAgentMgr != nil {
+		if err := subagent.RegisterTools(toolReg, f.subAgentMgr, session.AgentID, session.ID, false); err != nil {
+			return nil, fmt.Errorf("multiagent: registering subagent tools for session %s: %w", session.ID, err)
+		}
+	}
 
 	// Wire audit logger and rate limiter into the tool registry so that
 	// every tool call is recorded and rate-limited per-session.

@@ -11,7 +11,8 @@ import (
 
 // RegisterTools registers sub-agent tools on the given registry.
 // If isSubAgent is true, only read-only tools are registered (preventing recursive spawning).
-func RegisterTools(registry *tool.Registry, mgr *Manager, parentID string, isSubAgent bool) error {
+// sessionID is passed through to SpawnRequest for cross-session validation.
+func RegisterTools(registry *tool.Registry, mgr *Manager, parentID, sessionID string, isSubAgent bool) error {
 	// Always register read-only tools.
 	readOnly := []tool.Tool{
 		newSessionsListTool(mgr, parentID),
@@ -29,7 +30,7 @@ func RegisterTools(registry *tool.Registry, mgr *Manager, parentID string, isSub
 
 	// Register exec tools only for parent agents.
 	exec := []tool.Tool{
-		newSessionsSpawnTool(mgr, parentID),
+		newSessionsSpawnTool(mgr, parentID, sessionID),
 		newSessionsSendTool(mgr),
 		newSessionsKillTool(mgr),
 	}
@@ -45,12 +46,13 @@ func RegisterTools(registry *tool.Registry, mgr *Manager, parentID string, isSub
 // --- sessions_spawn ---
 
 type sessionsSpawnTool struct {
-	mgr      *Manager
-	parentID string
+	mgr       *Manager
+	parentID  string
+	sessionID string
 }
 
-func newSessionsSpawnTool(mgr *Manager, parentID string) *sessionsSpawnTool {
-	return &sessionsSpawnTool{mgr: mgr, parentID: parentID}
+func newSessionsSpawnTool(mgr *Manager, parentID, sessionID string) *sessionsSpawnTool {
+	return &sessionsSpawnTool{mgr: mgr, parentID: parentID, sessionID: sessionID}
 }
 
 func (t *sessionsSpawnTool) Name() string         { return "sessions_spawn" }
@@ -91,6 +93,7 @@ func (t *sessionsSpawnTool) Execute(ctx context.Context, args json.RawMessage, _
 
 	id, err := t.mgr.Spawn(ctx, SpawnRequest{
 		ParentID:       t.parentID,
+		SessionID:      t.sessionID,
 		SystemPrompt:   a.SystemPrompt,
 		InitialMessage: a.InitialMessage,
 		Timeout:        timeout,

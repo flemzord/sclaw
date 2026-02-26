@@ -23,7 +23,7 @@ func TestRegisterTools_FullAccess(t *testing.T) {
 	mgr := newTestManager(factory)
 	reg := tool.NewRegistry()
 
-	err := RegisterTools(reg, mgr, "parent-1", false)
+	err := RegisterTools(reg, mgr, "parent-1", "", false)
 	if err != nil {
 		t.Fatalf("RegisterTools returned error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRegisterTools_SubAgentRestricted(t *testing.T) {
 	mgr := newTestManager(factory)
 	reg := tool.NewRegistry()
 
-	err := RegisterTools(reg, mgr, "parent-1", true)
+	err := RegisterTools(reg, mgr, "parent-1", "", true)
 	if err != nil {
 		t.Fatalf("RegisterTools returned error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestSessionsSpawnTool_Execute(t *testing.T) {
 	}
 	mgr := newTestManager(factory)
 
-	spawnTool := newSessionsSpawnTool(mgr, "parent-1")
+	spawnTool := newSessionsSpawnTool(mgr, "parent-1", "")
 
 	args, _ := json.Marshal(spawnArgs{
 		SystemPrompt:   "You are a code reviewer.",
@@ -119,7 +119,7 @@ func TestSessionsSpawnTool_Execute_InvalidArgs(t *testing.T) {
 	factory := &mockLoopFactory{}
 	mgr := newTestManager(factory)
 
-	spawnTool := newSessionsSpawnTool(mgr, "parent-1")
+	spawnTool := newSessionsSpawnTool(mgr, "parent-1", "")
 
 	out, err := spawnTool.Execute(context.Background(), json.RawMessage(`{invalid`), tool.ExecutionEnv{})
 	if err != nil {
