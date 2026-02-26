@@ -10,9 +10,10 @@ import (
 // NewTestRedactor creates a Redactor with no patterns for testing.
 // This avoids false positives in tests that use strings matching
 // production secret patterns.
+// Direct instantiation is safe because sync.RWMutex zero-value is valid
+// and nil slices work correctly with range/append operations.
 func NewTestRedactor() *security.Redactor {
-	r := &security.Redactor{}
-	return r
+	return &security.Redactor{}
 }
 
 // NewTestCredentialStore creates a CredentialStore pre-populated with

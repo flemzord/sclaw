@@ -13,7 +13,6 @@ type RedactingHandler struct {
 	inner    slog.Handler
 	redactor *Redactor
 	groups   []string
-	attrs    []slog.Attr
 }
 
 // Compile-time check.
@@ -42,9 +41,6 @@ func (h *RedactingHandler) Handle(ctx context.Context, record slog.Record) error
 	// Build a new record with redacted attributes.
 	redacted := slog.NewRecord(record.Time, record.Level, record.Message, record.PC)
 
-	// Add pre-resolved attrs from WithAttrs calls.
-	redacted.AddAttrs(h.attrs...)
-
 	// Redact inline attributes from this specific log call.
 	record.Attrs(func(a slog.Attr) bool {
 		redacted.AddAttrs(h.redactAttr(a))
@@ -64,17 +60,19 @@ func (h *RedactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		inner:    h.inner.WithAttrs(redacted),
 		redactor: h.redactor,
 		groups:   h.groups,
-		attrs:    nil, // attrs folded into inner
 	}
 }
 
 // WithGroup returns a new handler with the given group name.
+// A fresh slice is allocated to prevent slice aliasing with the parent handler.
 func (h *RedactingHandler) WithGroup(name string) slog.Handler {
+	newGroups := make([]string, len(h.groups)+1)
+	copy(newGroups, h.groups)
+	newGroups[len(h.groups)] = name
 	return &RedactingHandler{
 		inner:    h.inner.WithGroup(name),
 		redactor: h.redactor,
-		groups:   append(h.groups, name),
-		attrs:    nil,
+		groups:   newGroups,
 	}
 }
 

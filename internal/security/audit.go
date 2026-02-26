@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,11 +57,12 @@ type AuditLoggerConfig struct {
 
 // AuditLogger writes structured audit events as JSONL with optional redaction.
 type AuditLogger struct {
-	writer   io.Writer
-	redactor *Redactor
-	onEvent  func(AuditEvent)
-	now      func() time.Time
-	mu       sync.Mutex
+	writer      io.Writer
+	redactor    *Redactor
+	onEvent     func(AuditEvent)
+	now         func() time.Time
+	mu          sync.Mutex
+	writeErrors atomic.Int64
 }
 
 // NewAuditLogger creates an audit logger with the given configuration.
@@ -111,6 +113,13 @@ func (l *AuditLogger) Log(event AuditEvent) {
 	}
 
 	if l.writer != nil {
-		_ = json.NewEncoder(l.writer).Encode(event)
+		if err := json.NewEncoder(l.writer).Encode(event); err != nil {
+			l.writeErrors.Add(1)
+		}
 	}
+}
+
+// WriteErrors returns the number of failed audit write operations.
+func (l *AuditLogger) WriteErrors() int64 {
+	return l.writeErrors.Load()
 }

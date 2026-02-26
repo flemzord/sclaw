@@ -124,6 +124,42 @@ func TestRedactingHandler_NoSecrets(t *testing.T) {
 	}
 }
 
+func TestRedactingHandler_WithGroup_NoSliceAliasing(t *testing.T) {
+	t.Parallel()
+
+	r := NewRedactor()
+	var buf1, buf2 bytes.Buffer
+	inner1 := slog.NewTextHandler(&buf1, &slog.HandlerOptions{Level: slog.LevelDebug})
+	parent := NewRedactingHandler(inner1, r)
+
+	// Create two children from the same parent.
+	child1 := parent.WithGroup("groupA").(*RedactingHandler)
+	child2 := parent.WithGroup("groupB").(*RedactingHandler)
+
+	// Verify their groups slices are independent.
+	if len(child1.groups) != 1 || child1.groups[0] != "groupA" {
+		t.Errorf("child1.groups = %v, want [groupA]", child1.groups)
+	}
+	if len(child2.groups) != 1 || child2.groups[0] != "groupB" {
+		t.Errorf("child2.groups = %v, want [groupB]", child2.groups)
+	}
+
+	// Verify further nesting doesn't affect siblings.
+	inner2 := slog.NewTextHandler(&buf2, &slog.HandlerOptions{Level: slog.LevelDebug})
+	parent2 := NewRedactingHandler(inner2, r)
+	// Pre-populate groups slice to capacity 1, triggering aliasing if append is used.
+	base := parent2.WithGroup("base").(*RedactingHandler)
+	nested1 := base.WithGroup("nested1").(*RedactingHandler)
+	nested2 := base.WithGroup("nested2").(*RedactingHandler)
+
+	if nested1.groups[1] != "nested1" {
+		t.Errorf("nested1.groups[1] = %q, want %q", nested1.groups[1], "nested1")
+	}
+	if nested2.groups[1] != "nested2" {
+		t.Errorf("nested2.groups[1] = %q, want %q", nested2.groups[1], "nested2")
+	}
+}
+
 func TestRedactingHandler_GroupAttr(t *testing.T) {
 	t.Parallel()
 

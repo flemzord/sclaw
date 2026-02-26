@@ -3,6 +3,8 @@ package security
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -153,5 +155,42 @@ func TestAuditLogger_NilWriter(t *testing.T) {
 
 	if !called {
 		t.Error("expected OnEvent to be called even with nil writer")
+	}
+}
+
+// errWriter always returns an error on Write to simulate a failing io.Writer.
+type errWriter struct{}
+
+func (errWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+func TestAuditLogger_WriteErrors_CountsFailures(t *testing.T) {
+	t.Parallel()
+
+	logger := NewAuditLogger(AuditLoggerConfig{
+		Writer: errWriter{},
+	})
+
+	logger.Log(AuditEvent{Type: EventMessage})
+	logger.Log(AuditEvent{Type: EventMessage})
+
+	if got := logger.WriteErrors(); got != 2 {
+		t.Errorf("WriteErrors() = %d, want 2", got)
+	}
+}
+
+func TestAuditLogger_WriteErrors_ZeroOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	logger := NewAuditLogger(AuditLoggerConfig{
+		Writer: io.Discard,
+	})
+
+	logger.Log(AuditEvent{Type: EventMessage})
+	logger.Log(AuditEvent{Type: EventMessage})
+
+	if got := logger.WriteErrors(); got != 0 {
+		t.Errorf("WriteErrors() = %d, want 0", got)
 	}
 }
