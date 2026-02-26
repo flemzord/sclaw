@@ -63,6 +63,7 @@ func TestSendStream(t *testing.T) {
 
 	tg := &Telegram{
 		client: client,
+		logger: discardLogger(),
 		config: Config{
 			StreamFlushInterval: 50 * time.Millisecond,
 		},
@@ -125,6 +126,7 @@ func TestSendStreamIgnoresNotModified(t *testing.T) {
 	client := NewClient("TOKEN", srv.URL)
 	tg := &Telegram{
 		client: client,
+		logger: discardLogger(),
 		config: Config{
 			StreamFlushInterval: 10 * time.Millisecond,
 		},

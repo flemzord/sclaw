@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -199,16 +200,16 @@ func extractMentions(msg *Message, botUsername string) *message.Mentions {
 
 // extractEntityText safely extracts a substring from text using UTF-16 offsets,
 // which is what Telegram uses for entity offsets and lengths.
+// Telegram encodes offsets as UTF-16 code units, so we must convert
+// to UTF-16, slice, and convert back to handle non-BMP characters (emojis).
 func extractEntityText(text string, offset, length int) string {
-	runes := []rune(text)
-	// Telegram uses UTF-16 offsets, but for BMP characters (most common),
-	// rune offsets are equivalent. This is a reasonable approximation.
-	if offset >= len(runes) {
+	encoded := utf16.Encode([]rune(text))
+	if offset >= len(encoded) {
 		return ""
 	}
 	end := offset + length
-	if end > len(runes) {
-		end = len(runes)
+	if end > len(encoded) {
+		end = len(encoded)
 	}
-	return string(runes[offset:end])
+	return string(utf16.Decode(encoded[offset:end]))
 }
