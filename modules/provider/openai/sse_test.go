@@ -181,15 +181,12 @@ func TestReadStream_ContextCancellation(t *testing.T) {
 	// The goroutine should exit promptly. It may send a context.Canceled
 	// error chunk, or it may simply close the channel if the context-aware
 	// send picked the ctx.Done() branch. Both are correct cancellation behavior.
-	var gotCanceled bool
 	for chunk := range ch {
-		if errors.Is(chunk.Err, context.Canceled) {
-			gotCanceled = true
+		if chunk.Err != nil && !errors.Is(chunk.Err, context.Canceled) {
+			t.Errorf("unexpected error: %v", chunk.Err)
 		}
 	}
-	// Channel closed — goroutine exited. Verify it didn't hang.
-	// gotCanceled may be true or false depending on scheduling; both are fine.
-	_ = gotCanceled
+	// Channel closed — goroutine exited without hanging.
 }
 
 func TestReadStream_UsageChunk(t *testing.T) {
