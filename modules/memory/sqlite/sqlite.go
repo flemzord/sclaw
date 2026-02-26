@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 
 	"github.com/flemzord/sclaw/internal/core"
@@ -76,6 +77,12 @@ func (m *Module) Provision(ctx *core.AppContext) error {
 
 	if m.config.Path == "" {
 		m.config.Path = filepath.Join(ctx.DataDir, defaultDBFile)
+	}
+
+	if dir := filepath.Dir(m.config.Path); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("sqlite: create directory %s: %w", dir, err)
+		}
 	}
 
 	db, err := sql.Open("sqlite", m.config.Path)
