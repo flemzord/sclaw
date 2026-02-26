@@ -234,7 +234,7 @@ func (o *OpenRouter) doRequest(ctx context.Context, apiReq apiRequest) (*http.Re
 	if err != nil {
 		// Wrap transport errors with ErrProviderDown so the failover chain
 		// treats network failures as retryable.
-		return nil, fmt.Errorf("openrouter: sending request: %w", provider.ErrProviderDown)
+		return nil, fmt.Errorf("openrouter: sending request: %w: %w", err, provider.ErrProviderDown)
 	}
 
 	return resp, nil
