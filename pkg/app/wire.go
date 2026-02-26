@@ -120,6 +120,7 @@ func wireRouter(
 	r, err := router.NewRouter(router.Config{
 		AgentFactory:   factory,
 		ResponseSender: dispatcher,
+		ChannelLookup:  dispatcher,
 		Logger:         logger,
 		RateLimiter:    rateLimiter,
 	})

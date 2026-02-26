@@ -25,6 +25,7 @@ type Config struct {
 	GroupPolicy    GroupPolicy
 	AgentFactory   AgentFactory
 	ResponseSender ResponseSender
+	ChannelLookup  ChannelLookup
 	Logger         *slog.Logger
 
 	// HookPipeline runs hooks at before_process, before_send, and after_send.
@@ -104,6 +105,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		ApprovalManager: approvalMgr,
 		AgentFactory:    cfg.AgentFactory,
 		ResponseSender:  cfg.ResponseSender,
+		ChannelLookup:   cfg.ChannelLookup,
 		Pruner:          pruner,
 		Logger:          cfg.Logger,
 		HookPipeline:    cfg.HookPipeline,

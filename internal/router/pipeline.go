@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/security"
@@ -27,6 +28,10 @@ type PipelineConfig struct {
 	Pruner          *lazyPruner
 	HookPipeline    *hook.Pipeline
 	Logger          *slog.Logger
+
+	// ChannelLookup resolves channels by name, used to start typing
+	// indicators while the agent is processing. Nil means no typing.
+	ChannelLookup ChannelLookup
 
 	// AuditLogger, if non-nil, emits session lifecycle events (session_create).
 	// session_delete events are emitted by the admin handler.
@@ -165,8 +170,26 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		SystemPrompt: "You are a helpful assistant.", // Placeholder — will come from config/context engine.
 	}
 
+	// Step 9b: Typing indicator — show "typing..." while agent processes.
+	var cancelTyping context.CancelFunc
+	if p.cfg.ChannelLookup != nil {
+		if ch, ok := p.cfg.ChannelLookup.Get(env.Key.Channel); ok {
+			if tc, ok := ch.(channel.TypingChannel); ok {
+				typingCtx, cancel := context.WithCancel(ctx)
+				cancelTyping = cancel
+				channel.StartTypingLoop(typingCtx, tc, env.Message.Chat, 0)
+			}
+		}
+	}
+
 	// Step 10: Agent loop — run the agent.
 	resp, err := loop.Run(ctx, req)
+
+	// Stop typing indicator before handling the result.
+	if cancelTyping != nil {
+		cancelTyping()
+	}
+
 	if err != nil {
 		logger.Error("pipeline: agent loop failed", "error", err, "session_id", session.ID)
 		p.sendError(ctx, env.Message, "An error occurred while processing your message.")

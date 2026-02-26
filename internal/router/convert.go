@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/pkg/message"
@@ -16,6 +17,11 @@ var _ hook.SessionView = (*sessionViewAdapter)(nil)
 // ResponseSender delivers outbound messages to a channel.
 type ResponseSender interface {
 	Send(ctx context.Context, msg message.OutboundMessage) error
+}
+
+// ChannelLookup resolves a channel by name. Implemented by channel.Dispatcher.
+type ChannelLookup interface {
+	Get(name string) (channel.Channel, bool)
 }
 
 // AgentFactory creates agent loops for sessions.

@@ -6,8 +6,11 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/channel"
+	"github.com/flemzord/sclaw/internal/channel/channeltest"
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
@@ -525,4 +528,109 @@ func (h *errorHook) Priority() int           { return 0 }
 
 func (h *errorHook) Execute(_ context.Context, _ *hook.Context) (hook.Action, error) {
 	return hook.ActionContinue, h.err
+}
+
+// testChannelLookup wraps a map of channels to implement ChannelLookup.
+type testChannelLookup struct {
+	channels map[string]channel.Channel
+}
+
+func (l *testChannelLookup) Get(name string) (channel.Channel, bool) {
+	ch, ok := l.channels[name]
+	return ch, ok
+}
+
+func TestPipeline_TypingIndicator(t *testing.T) {
+	t.Parallel()
+
+	// Use a slow provider so the typing goroutine has time to send
+	// at least one indicator before loop.Run returns.
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
+			time.Sleep(50 * time.Millisecond)
+			return provider.CompletionResponse{
+				Content:      "Typed!",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// Create a mock channel that supports typing.
+	mockCh := channeltest.NewMockStreamingChannel("slack", nil)
+	lookup := &testChannelLookup{
+		channels: map[string]channel.Channel{"slack": mockCh},
+	}
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		ChannelLookup:   lookup,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Verify that SendTyping was called at least once.
+	chats := mockCh.TypingChats()
+	if len(chats) == 0 {
+		t.Fatal("expected at least one typing indicator, got none")
+	}
+
+	// Verify the typing was sent to the correct chat.
+	if chats[0].ID != env.Message.Chat.ID {
+		t.Errorf("typing chat ID = %q, want %q", chats[0].ID, env.Message.Chat.ID)
+	}
+}
+
+func TestPipeline_TypingIndicator_NonTypingChannel(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("No typing")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// Use a plain MockChannel that does NOT implement TypingChannel.
+	mockCh := channeltest.NewMockChannel("slack", nil)
+	lookup := &testChannelLookup{
+		channels: map[string]channel.Channel{"slack": mockCh},
+	}
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		ChannelLookup:   lookup,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	// Should succeed without error — just no typing indicator sent.
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Response == nil {
+		t.Fatal("expected non-nil response")
+	}
 }
