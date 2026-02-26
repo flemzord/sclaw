@@ -3,12 +3,18 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	sdkanthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 	"github.com/flemzord/sclaw/internal/provider"
 )
+
+// maxToolBuffers is the maximum number of concurrent tool_use content blocks
+// tracked during a single stream. This bounds memory in case of a misbehaving
+// server that sends unbounded ContentBlockStart events without matching Stop events.
+const maxToolBuffers = 100
 
 // streamBufferSize matches the agent loop's channel buffer (loop.go:193).
 const streamBufferSize = 16
@@ -26,7 +32,7 @@ func (a *Anthropic) Stream(ctx context.Context, req provider.CompletionRequest) 
 	// the Provider interface contract. This enables the chain to failover.
 	if !stream.Next() {
 		err := stream.Err()
-		_ = stream.Close()
+		_ = stream.Close() //nolint:errcheck // best-effort close
 		if err != nil {
 			return nil, mapError(err)
 		}
@@ -42,7 +48,7 @@ func (a *Anthropic) Stream(ctx context.Context, req provider.CompletionRequest) 
 
 	go func() {
 		defer close(ch)
-		defer func() { _ = stream.Close() }()
+		defer func() { _ = stream.Close() }() //nolint:errcheck // best-effort close
 
 		a.consumeStreamWithFirst(ctx, stream, firstEvent, ch)
 	}()
@@ -105,7 +111,7 @@ func (a *Anthropic) processEvent(
 		state.inputTokens = ev.Message.Usage.InputTokens
 
 	case sdkanthropic.ContentBlockStartEvent:
-		a.handleBlockStart(state, ev)
+		a.handleBlockStart(ctx, state, ev, ch)
 
 	case sdkanthropic.ContentBlockDeltaEvent:
 		a.handleBlockDelta(ctx, state, ev, ch)
@@ -119,12 +125,19 @@ func (a *Anthropic) processEvent(
 }
 
 // handleBlockStart initializes tracking for a new content block.
-func (a *Anthropic) handleBlockStart(state *streamState, ev sdkanthropic.ContentBlockStartEvent) {
-	if ev.ContentBlock.Type == "tool_use" {
-		state.toolBuffers[ev.Index] = &toolBuffer{
-			id:   ev.ContentBlock.ID,
-			name: ev.ContentBlock.Name,
-		}
+func (a *Anthropic) handleBlockStart(ctx context.Context, state *streamState, ev sdkanthropic.ContentBlockStartEvent, ch chan<- provider.StreamChunk) {
+	if ev.ContentBlock.Type != "tool_use" {
+		return
+	}
+	if len(state.toolBuffers) >= maxToolBuffers {
+		emit(ctx, ch, provider.StreamChunk{
+			Err: fmt.Errorf("provider.anthropic: exceeded max tool buffers (%d)", maxToolBuffers),
+		})
+		return
+	}
+	state.toolBuffers[ev.Index] = &toolBuffer{
+		id:   ev.ContentBlock.ID,
+		name: ev.ContentBlock.Name,
 	}
 }
 
