@@ -11,7 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
+	"os"
+	"time"
 
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/provider"
@@ -49,33 +50,33 @@ func (p *Provider) Configure(node *yaml.Node) error {
 // Provision implements core.Provisioner.
 func (p *Provider) Provision(ctx *core.AppContext) error {
 	p.logger = ctx.Logger
+
+	// Resolve API key: api_key_env takes precedence (reads from environment),
+	// falling back to the literal api_key value from config.
+	if p.config.APIKeyEnv != "" {
+		if v, ok := os.LookupEnv(p.config.APIKeyEnv); ok && v != "" {
+			p.config.APIKey = v
+		} else {
+			return fmt.Errorf("provider.openai_compatible: env var %q is empty or unset", p.config.APIKeyEnv)
+		}
+	}
+
 	// Use a transport with response-header timeout instead of a global client timeout.
 	// A global timeout kills long-running SSE streams; per-request context handles cancellation.
 	p.client = &http.Client{
 		Transport: &http.Transport{
 			ResponseHeaderTimeout: p.config.Timeout,
+			TLSHandshakeTimeout:   10 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
 		},
 	}
 
-	// Create a single-entry chain with this provider as primary.
-	auth, err := provider.NewAuthProfile(p.config.APIKey)
-	if err != nil {
-		return fmt.Errorf("create auth profile: %w", err)
-	}
-
-	chain, err := provider.NewChain([]provider.ChainEntry{
-		{
-			Name:     "openai_compatible",
-			Provider: p,
-			Role:     provider.RolePrimary,
-			Auth:     auth,
-		},
-	}, provider.WithLogger(p.logger))
-	if err != nil {
-		return fmt.Errorf("create provider chain: %w", err)
-	}
-
-	ctx.RegisterService("provider.chain", chain)
+	// Register this provider as an individual service so that an external
+	// orchestrator (e.g. multiagent) can discover providers and build the
+	// failover Chain itself. This avoids each provider creating its own
+	// single-entry chain and clobbering a shared "provider.chain" key.
+	ctx.RegisterService("provider.openai_compatible", p)
 	return nil
 }
 
@@ -157,7 +158,7 @@ func (p *Provider) ModelName() string {
 // HealthCheck implements provider.HealthChecker.
 // It probes the /models endpoint to check provider availability.
 func (p *Provider) HealthCheck(ctx context.Context) error {
-	endpoint := strings.TrimRight(p.config.BaseURL, "/") + "/models"
+	endpoint := p.config.BaseURL + "/models"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
