@@ -3,6 +3,7 @@ package security
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -51,9 +52,21 @@ func (f *URLFilter) Check(rawURL string) error {
 		return fmt.Errorf("%w: invalid URL: %w", ErrURLBlocked, err)
 	}
 
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("%w: scheme %q not allowed (only http and https)", ErrURLBlocked, scheme)
+	}
+
 	host := strings.ToLower(parsed.Hostname())
 	if host == "" {
 		return fmt.Errorf("%w: empty hostname", ErrURLBlocked)
+	}
+
+	// Block private, loopback, and link-local IP addresses.
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return fmt.Errorf("%w: %s (private/loopback/link-local IP not allowed)", ErrURLBlocked, host)
+		}
 	}
 
 	// Deny list takes precedence.

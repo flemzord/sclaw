@@ -123,6 +123,57 @@ func TestURLFilter_IsConfigured(t *testing.T) {
 	}
 }
 
+func TestURLFilter_Check_BlocksFileScheme(t *testing.T) {
+	t.Parallel()
+
+	f := NewURLFilter(URLFilterConfig{AllowDomains: []string{"example.com"}})
+
+	if err := f.Check("file:///etc/passwd"); !errors.Is(err, ErrURLBlocked) {
+		t.Errorf("expected ErrURLBlocked for file scheme, got %v", err)
+	}
+}
+
+func TestURLFilter_Check_BlocksGopherScheme(t *testing.T) {
+	t.Parallel()
+
+	f := NewURLFilter(URLFilterConfig{AllowDomains: []string{"example.com"}})
+
+	if err := f.Check("gopher://example.com/path"); !errors.Is(err, ErrURLBlocked) {
+		t.Errorf("expected ErrURLBlocked for gopher scheme, got %v", err)
+	}
+}
+
+func TestURLFilter_Check_BlocksLoopbackIP(t *testing.T) {
+	t.Parallel()
+
+	f := NewURLFilter(URLFilterConfig{AllowDomains: []string{"127.0.0.1"}})
+
+	if err := f.Check("http://127.0.0.1/admin"); !errors.Is(err, ErrURLBlocked) {
+		t.Errorf("expected ErrURLBlocked for loopback IP, got %v", err)
+	}
+}
+
+func TestURLFilter_Check_BlocksPrivateIP(t *testing.T) {
+	t.Parallel()
+
+	f := NewURLFilter(URLFilterConfig{AllowDomains: []string{"192.168.1.1"}})
+
+	if err := f.Check("http://192.168.1.1/internal"); !errors.Is(err, ErrURLBlocked) {
+		t.Errorf("expected ErrURLBlocked for private IP, got %v", err)
+	}
+}
+
+func TestURLFilter_Check_BlocksLinkLocalIP(t *testing.T) {
+	t.Parallel()
+
+	f := NewURLFilter(URLFilterConfig{AllowDomains: []string{"169.254.169.254"}})
+
+	// 169.254.169.254 is the AWS metadata endpoint — a classic SSRF target.
+	if err := f.Check("http://169.254.169.254/latest/meta-data/"); !errors.Is(err, ErrURLBlocked) {
+		t.Errorf("expected ErrURLBlocked for link-local IP, got %v", err)
+	}
+}
+
 func TestMatchDomain(t *testing.T) {
 	t.Parallel()
 
