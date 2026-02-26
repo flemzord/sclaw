@@ -12,6 +12,8 @@ import (
 // Validate checks the structural validity of a Config.
 // It verifies the version field, ensures modules are present,
 // and checks that all referenced module IDs exist in the registry.
+// Configurable modules that are registered but not listed in config
+// are simply not loaded — this is not an error.
 // It also validates plugin, security, and agent settings.
 // Configurable modules not listed in config are simply not loaded — no error.
 func Validate(cfg *Config) error {
