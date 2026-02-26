@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/flemzord/sclaw/internal/security"
@@ -92,10 +93,14 @@ func (d *WebhookDispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate JSON depth to protect against JSON bombs.
+	// Only validate if the Content-Type is JSON or unset (assume JSON for empty).
 	if len(body) > 0 {
-		if err := security.ValidateJSONDepth(body, 0); err != nil {
-			http.Error(w, "invalid payload", http.StatusBadRequest)
-			return
+		contentType := r.Header.Get("Content-Type")
+		if strings.Contains(contentType, "json") || contentType == "" {
+			if err := security.ValidateJSONDepth(body, 0); err != nil {
+				http.Error(w, "invalid payload", http.StatusBadRequest)
+				return
+			}
 		}
 	}
 
@@ -105,8 +110,7 @@ func (d *WebhookDispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		d.logger.Warn("webhook received for unregistered source", "source", source)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true,"warning":"no handler registered"}`))
+		http.Error(w, "unknown webhook source", http.StatusNotFound)
 		return
 	}
 

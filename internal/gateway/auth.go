@@ -11,9 +11,18 @@ import (
 // authMiddleware returns a chi-compatible middleware that validates Bearer token
 // or Basic auth credentials using constant-time comparison.
 // If an AuditLogger is provided, auth_success and auth_failure events are emitted.
-func authMiddleware(cfg AuthConfig, auditLogger *security.AuditLogger) func(http.Handler) http.Handler {
+// If a RateLimiter is provided, auth attempts are rate-limited using the "auth" bucket.
+func authMiddleware(cfg AuthConfig, auditLogger *security.AuditLogger, rateLimiter *security.RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Rate limit auth attempts using the central rate limiter.
+			if rateLimiter != nil {
+				if err := rateLimiter.Allow("auth"); err != nil {
+					http.Error(w, "too many requests", http.StatusTooManyRequests)
+					return
+				}
+			}
+
 			auth := r.Header.Get("Authorization")
 			if auth == "" {
 				emitAuthEvent(auditLogger, security.EventAuthFailure, r, "missing authorization header")

@@ -57,6 +57,7 @@ func (g *Gateway) handleListSessions() http.HandlerFunc {
 			})
 		}
 
+		// Force empty JSON array instead of null for API consumers.
 		if sessions == nil {
 			sessions = []sessionJSON{}
 		}
@@ -179,7 +180,7 @@ func (g *Gateway) handleGetConfig() http.HandlerFunc {
 
 // handleReloadConfig triggers a hot-reload of the configuration.
 func (g *Gateway) handleReloadConfig() http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		cfgPath := g.configPath
 		if cfgPath == "" {
 			http.Error(w, "config path not set", http.StatusServiceUnavailable)
@@ -196,6 +197,18 @@ func (g *Gateway) handleReloadConfig() http.HandlerFunc {
 		if err := config.Validate(cfg); err != nil {
 			g.logger.Error("config validation failed on reload", "error", err)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		if g.reloadHandler != nil {
+			if err := g.reloadHandler.HandleReloadFromConfig(r.Context(), cfg); err != nil {
+				g.logger.Error("config reload failed", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload failed: " + err.Error()})
+				return
+			}
+		} else {
+			g.logger.Warn("reload handler not available, config validated but not applied")
+			writeJSON(w, http.StatusOK, map[string]string{"status": "validated", "warning": "reload handler not available"})
 			return
 		}
 
