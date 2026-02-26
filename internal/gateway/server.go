@@ -26,7 +26,7 @@ func (g *Gateway) buildRouter() http.Handler {
 	// Admin endpoints — auth required. Not mounted if no auth configured.
 	if g.config.Auth.IsConfigured() {
 		r.Group(func(r chi.Router) {
-			r.Use(authMiddleware(g.config.Auth))
+			r.Use(authMiddleware(g.config.Auth, g.auditLogger, g.rateLimiter))
 			r.Get("/status", g.handleStatus())
 			r.Route("/api", func(r chi.Router) {
 				r.Get("/sessions", g.handleListSessions())
@@ -37,6 +37,8 @@ func (g *Gateway) buildRouter() http.Handler {
 				r.Post("/config/reload", g.handleReloadConfig())
 			})
 		})
+	} else {
+		g.logger.Warn("gateway: admin API disabled (no auth configured)")
 	}
 
 	return r

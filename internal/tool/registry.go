@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 // Schema is a tool's name paired with its JSON Schema, returned by Registry.Schemas.
@@ -21,8 +24,10 @@ type Schema struct {
 // through the policy and approval system.
 // It is instance-based (not global) for better testability.
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
+	mu          sync.RWMutex
+	tools       map[string]Tool
+	auditLogger *security.AuditLogger
+	rateLimiter *security.RateLimiter
 }
 
 // NewRegistry creates an empty tool registry.
@@ -30,6 +35,20 @@ func NewRegistry() *Registry {
 	return &Registry{
 		tools: make(map[string]Tool),
 	}
+}
+
+// SetAuditLogger configures audit logging for tool executions.
+func (r *Registry) SetAuditLogger(logger *security.AuditLogger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.auditLogger = logger
+}
+
+// SetRateLimiter configures rate limiting for tool executions.
+func (r *Registry) SetRateLimiter(limiter *security.RateLimiter) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rateLimiter = limiter
 }
 
 // Register adds a tool to the registry.
@@ -98,8 +117,8 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// Execute orchestrates tool execution: lookup → policy resolution → elevated
-// adjustment → deny/allow/ask flow.
+// Execute orchestrates tool execution: lookup → rate limit → policy resolution →
+// elevated adjustment → deny/allow/ask flow → audit.
 func (r *Registry) Execute(
 	ctx context.Context,
 	name string,
@@ -117,6 +136,35 @@ func (r *Registry) Execute(
 		return Output{}, err
 	}
 
+	// Rate limit check before execution.
+	r.mu.RLock()
+	rl := r.rateLimiter
+	al := r.auditLogger
+	r.mu.RUnlock()
+
+	if rl != nil {
+		if err := rl.Allow("tool_call"); err != nil {
+			if al != nil {
+				al.Log(security.AuditEvent{
+					Type:     security.EventRateLimit,
+					ToolName: name,
+					Detail:   "tool_call rate limit exceeded",
+				})
+			}
+			return Output{}, fmt.Errorf("tool %s: %w", name, err)
+		}
+	}
+
+	// Emit tool_call audit event before execution.
+	// Truncate args to prevent audit log bloat from large payloads.
+	if al != nil {
+		al.Log(security.AuditEvent{
+			Type:     security.EventToolCall,
+			ToolName: name,
+			Detail:   truncateForAudit(string(args)),
+		})
+	}
+
 	// Resolve the effective policy.
 	level := ResolvePolicy(policyCfg, policyCtx, t)
 
@@ -125,12 +173,14 @@ func (r *Registry) Execute(
 		level = elevated.Apply(level)
 	}
 
+	var output Output
+
 	switch level {
 	case ApprovalDeny:
 		return Output{}, fmt.Errorf("%w: %s", ErrDenied, name)
 
 	case ApprovalAllow:
-		return t.Execute(ctx, args, env)
+		output, err = t.Execute(ctx, args, env)
 
 	case ApprovalAsk:
 		if requester == nil {
@@ -138,24 +188,77 @@ func (r *Registry) Execute(
 		}
 
 		pending := NewPendingApproval()
-		resp, err := pending.Begin(ctx, requester, ApprovalRequest{
+		resp, reqErr := pending.Begin(ctx, requester, ApprovalRequest{
 			ID:          fmt.Sprintf("approve-%s-%d", name, time.Now().UnixNano()),
 			ToolName:    name,
 			Description: t.Description(),
 			Arguments:   args,
 			Context:     policyCtx,
 		}, timeout)
-		if err != nil {
-			return Output{}, err
+		if reqErr != nil {
+			return Output{}, reqErr
 		}
 
 		if !resp.Approved {
+			if al != nil {
+				al.Log(security.AuditEvent{
+					Type:     security.EventApproval,
+					ToolName: name,
+					Detail:   "denied: " + resp.Reason,
+				})
+			}
 			return Output{}, fmt.Errorf("%w: %s (user denied: %s)", ErrDenied, name, resp.Reason)
 		}
 
-		return t.Execute(ctx, args, env)
+		if al != nil {
+			al.Log(security.AuditEvent{
+				Type:     security.EventApproval,
+				ToolName: name,
+				Detail:   "approved",
+			})
+		}
+
+		output, err = t.Execute(ctx, args, env)
 
 	default:
 		return Output{}, fmt.Errorf("%w: %s (unknown policy level: %s)", ErrDenied, name, level)
 	}
+
+	// Emit tool_result audit event after execution.
+	// Truncate output to prevent audit log bloat from large results.
+	if al != nil {
+		detail := truncateForAudit(output.Content)
+		if err != nil {
+			detail = "error: " + err.Error()
+		}
+		al.Log(security.AuditEvent{
+			Type:     security.EventToolResult,
+			ToolName: name,
+			Detail:   detail,
+			Metadata: map[string]string{
+				"is_error": fmt.Sprintf("%v", output.IsError || err != nil),
+			},
+		})
+	}
+
+	return output, err
+}
+
+// maxAuditDetailLen is the maximum length of audit detail strings.
+// Longer values are truncated to prevent log bloat from large tool outputs.
+const maxAuditDetailLen = 4096
+
+// truncateForAudit truncates a string to maxAuditDetailLen, appending
+// a truncation indicator if the string was shortened.
+// It walks back to a valid UTF-8 rune boundary to avoid splitting multi-byte
+// characters when the cut falls mid-rune.
+func truncateForAudit(s string) string {
+	if len(s) <= maxAuditDetailLen {
+		return s
+	}
+	i := maxAuditDetailLen
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return s[:i] + "...(truncated)"
 }

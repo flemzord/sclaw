@@ -8,6 +8,7 @@ import (
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -18,6 +19,21 @@ type FactoryConfig struct {
 	DefaultProvider provider.Provider
 	GlobalTools     *tool.Registry
 	Logger          *slog.Logger
+
+	// AuditLogger, if non-nil, is wired into each per-session tool registry
+	// so that tool executions are recorded in the audit log.
+	AuditLogger *security.AuditLogger
+
+	// RateLimiter, if non-nil, is wired into each per-session tool registry
+	// to enforce tool-call rate limits.
+	RateLimiter *security.RateLimiter
+
+	// URLFilter, if non-nil, restricts which URLs network tools can access.
+	URLFilter *security.URLFilter
+
+	// SanitizedEnv, if non-nil, provides a pre-sanitized set of environment
+	// variables passed to tools that spawn subprocesses.
+	SanitizedEnv []string
 }
 
 // Factory resolves the agent for a session and creates an agent.Loop
@@ -62,12 +78,23 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 	// Build tool registry (filtered or global).
 	toolReg := f.buildToolRegistry(agentCfg)
 
+	// Wire audit logger and rate limiter into the tool registry so that
+	// every tool call is recorded and rate-limited per-session.
+	if f.cfg.AuditLogger != nil {
+		toolReg.SetAuditLogger(f.cfg.AuditLogger)
+	}
+	if f.cfg.RateLimiter != nil {
+		toolReg.SetRateLimiter(f.cfg.RateLimiter)
+	}
+
 	// Build executor.
 	executor := agent.NewToolExecutor(agent.ToolExecutorConfig{
 		Registry: toolReg,
 		Env: tool.ExecutionEnv{
-			Workspace: agentCfg.Workspace,
-			DataDir:   agentCfg.Workspace + "/data",
+			Workspace:    agentCfg.Workspace,
+			DataDir:      agentCfg.Workspace + "/data",
+			SanitizedEnv: f.cfg.SanitizedEnv,
+			URLFilter:    f.cfg.URLFilter,
 		},
 	})
 

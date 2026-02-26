@@ -16,6 +16,10 @@ type InMemorySessionStore struct {
 	mu       sync.RWMutex
 	sessions map[SessionKey]*Session
 
+	// maxSessions limits the number of concurrent sessions.
+	// Zero means unlimited.
+	maxSessions int
+
 	// now is injectable for testing. Defaults to time.Now.
 	now func() time.Time
 }
@@ -28,14 +32,29 @@ func NewInMemorySessionStore() *InMemorySessionStore {
 	}
 }
 
+// SetMaxSessions configures the maximum number of concurrent sessions.
+// Zero means unlimited.
+func (s *InMemorySessionStore) SetMaxSessions(limit int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxSessions = limit
+}
+
 // GetOrCreate returns the existing session for the key, or creates a new
 // one if none exists. The bool return is true when a new session was created.
+// If maxSessions > 0 and the limit is reached, no new session is created
+// and (nil, false) is returned.
 func (s *InMemorySessionStore) GetOrCreate(key SessionKey) (*Session, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if sess, ok := s.sessions[key]; ok {
 		return sess, false
+	}
+
+	// Enforce max sessions if configured.
+	if s.maxSessions > 0 && len(s.sessions) >= s.maxSessions {
+		return nil, false
 	}
 
 	id, err := generateID()

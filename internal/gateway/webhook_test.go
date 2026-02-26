@@ -89,8 +89,8 @@ func TestWebhookDispatcher_UnregisteredSource(t *testing.T) {
 
 	r.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d (graceful degradation)", rr.Code, http.StatusOK)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d (unregistered source returns 404)", rr.Code, http.StatusNotFound)
 	}
 }
 

@@ -45,7 +45,10 @@ func (p PluginEntry) String() string {
 
 // SecurityConfig holds security-related settings.
 type SecurityConfig struct {
-	Plugins PluginSecurityConfig `yaml:"plugins"`
+	Plugins    PluginSecurityConfig `yaml:"plugins"`
+	RateLimits RateLimitConfig      `yaml:"rate_limits,omitempty"`
+	Sandbox    SandboxConfig        `yaml:"sandbox,omitempty"`
+	URLFilter  URLFilterConfig      `yaml:"url_filter,omitempty"`
 }
 
 // PluginSecurityConfig controls plugin certification requirements.
@@ -56,4 +59,28 @@ type PluginSecurityConfig struct {
 	// TrustedKeys is a list of hex-encoded Ed25519 public keys
 	// that are allowed to sign plugins.
 	TrustedKeys []string `yaml:"trusted_keys,omitempty"`
+}
+
+// RateLimitConfig holds rate limiting settings.
+type RateLimitConfig struct {
+	MaxSessions     int `yaml:"max_sessions"`
+	MessagesPerMin  int `yaml:"messages_per_min"`
+	ToolCallsPerMin int `yaml:"tool_calls_per_min"`
+	TokensPerHour   int `yaml:"tokens_per_hour"`
+}
+
+// SandboxConfig holds sandbox settings.
+type SandboxConfig struct {
+	Enabled                bool     `yaml:"enabled"`
+	ScopesRequiringSandbox []string `yaml:"scopes_requiring_sandbox,omitempty"`
+	Image                  string   `yaml:"image,omitempty"`
+	CPUShares              int      `yaml:"cpu_shares,omitempty"`
+	MemoryMB               int      `yaml:"memory_mb,omitempty"`
+	DiskMB                 int      `yaml:"disk_mb,omitempty"`
+}
+
+// URLFilterConfig holds URL filtering settings.
+type URLFilterConfig struct {
+	AllowDomains []string `yaml:"allow_domains,omitempty"`
+	DenyDomains  []string `yaml:"deny_domains,omitempty"`
 }

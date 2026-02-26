@@ -12,8 +12,7 @@ import (
 // Validate checks the structural validity of a Config.
 // It verifies the version field, ensures modules are present,
 // and checks that all referenced module IDs exist in the registry.
-// It also enforces that Configurable modules have a config entry
-// and validates plugin, security, and agent settings.
+// It also validates plugin, security, and agent settings.
 func Validate(cfg *Config) error {
 	var errs []error
 
@@ -33,15 +32,9 @@ func Validate(cfg *Config) error {
 		}
 	}
 
-	// Strict check: registered Configurable modules must have a config entry.
-	for _, info := range core.GetModules() {
-		mod := info.New()
-		if _, ok := mod.(core.Configurable); ok {
-			if _, exists := cfg.Modules[string(info.ID)]; !exists {
-				errs = append(errs, fmt.Errorf("config: module %q requires configuration but has no entry", info.ID))
-			}
-		}
-	}
+	// NOTE: Configurable modules NOT listed in cfg.Modules are simply not
+	// loaded — that is not an error. We only validate what the user chose
+	// to include.
 
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)

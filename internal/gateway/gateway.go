@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
+	"github.com/flemzord/sclaw/internal/security"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,8 +33,14 @@ type Gateway struct {
 	startedAt  time.Time
 
 	// Resolved lazily at Start() via service registry.
-	sessions router.SessionStore
-	chain    *provider.Chain
+	sessions      router.SessionStore
+	chain         *provider.Chain
+	redactor      *security.Redactor
+	auditLogger   *security.AuditLogger
+	rateLimiter   *security.RateLimiter
+	reloadHandler interface {
+		HandleReloadFromConfig(context.Context, *config.Config) error
+	}
 }
 
 // ModuleInfo implements core.Module.
@@ -101,16 +109,46 @@ func (g *Gateway) Start() error {
 			g.chain = chain
 		}
 	}
+	if svc, ok := g.appCtx.GetService("security.redactor"); ok {
+		if r, ok := svc.(*security.Redactor); ok {
+			g.redactor = r
+		}
+	}
+	if svc, ok := g.appCtx.GetService("security.audit"); ok {
+		if al, ok := svc.(*security.AuditLogger); ok {
+			g.auditLogger = al
+		}
+	}
+	if svc, ok := g.appCtx.GetService("security.ratelimiter"); ok {
+		if rl, ok := svc.(*security.RateLimiter); ok {
+			g.rateLimiter = rl
+		}
+	}
+	if svc, ok := g.appCtx.GetService("reload.handler"); ok {
+		if rh, ok := svc.(interface {
+			HandleReloadFromConfig(context.Context, *config.Config) error
+		}); ok {
+			g.reloadHandler = rh
+		}
+	}
+	// Override config path if injected via service registry (M-7).
+	if svc, ok := g.appCtx.GetService("config.path"); ok {
+		if path, ok := svc.(string); ok && path != "" {
+			g.configPath = path
+		}
+	}
 
 	g.startedAt = time.Now()
 
 	mux := g.buildRouter()
 
 	g.server = &http.Server{
-		Addr:         g.config.Bind,
-		Handler:      mux,
-		ReadTimeout:  g.config.ReadTimeout,
-		WriteTimeout: g.config.WriteTimeout,
+		Addr:           g.config.Bind,
+		Handler:        mux,
+		ReadTimeout:    g.config.ReadTimeout,
+		WriteTimeout:   g.config.WriteTimeout,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1 MiB
 	}
 
 	var lc net.ListenConfig

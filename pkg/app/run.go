@@ -15,6 +15,7 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/reload"
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 // RunParams configures the main application loop.
@@ -65,9 +66,34 @@ func Run(params RunParams) error {
 		return err
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// Initialize credential store and redactor (security foundation).
+	credStore := security.NewCredentialStore()
+	redactor := security.NewRedactor()
+
+	// Wrap the text handler in a redacting handler to prevent secret leakage in logs.
+	innerHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: params.LogLevel,
-	}))
+	})
+	logger := slog.New(security.NewRedactingHandler(innerHandler, redactor))
+
+	// Initialize audit logger.
+	auditLogger := security.NewAuditLogger(security.AuditLoggerConfig{
+		Redactor: redactor,
+	})
+
+	// Initialize rate limiter from config if present.
+	var rateLimiter *security.RateLimiter
+	if cfg.Security != nil {
+		rl := cfg.Security.RateLimits
+		rateLimiter = security.NewRateLimiter(security.RateLimitConfig{
+			MaxSessions:     rl.MaxSessions,
+			MessagesPerMin:  rl.MessagesPerMin,
+			ToolCallsPerMin: rl.ToolCallsPerMin,
+			TokensPerHour:   rl.TokensPerHour,
+		})
+	} else {
+		rateLimiter = security.NewRateLimiter(security.RateLimitConfig{})
+	}
 
 	dataDir := params.DataDir
 	if dataDir == "" {
@@ -80,6 +106,12 @@ func Run(params RunParams) error {
 
 	appCtx := core.NewAppContext(logger, dataDir, workspace)
 	appCtx = appCtx.WithModuleConfigs(cfg.Modules)
+
+	// Register security services for cross-module discovery.
+	appCtx.RegisterService("security.credentials", credStore)
+	appCtx.RegisterService("security.redactor", redactor)
+	appCtx.RegisterService("security.audit", auditLogger)
+	appCtx.RegisterService("security.ratelimiter", rateLimiter)
 
 	// Parse and register multi-agent configuration if present.
 	if len(cfg.Agents) > 0 {
@@ -96,23 +128,45 @@ func Run(params RunParams) error {
 		logger.Info("multi-agent mode enabled", "agents", len(agents))
 	}
 
+	// Register the config path so modules (e.g. the gateway) can discover it.
+	appCtx.RegisterService("config.path", cfgPath)
+
+	// Build and register URL filter if configured.
+	if cfg.Security != nil && len(cfg.Security.URLFilter.AllowDomains) > 0 {
+		urlFilter := security.NewURLFilter(security.URLFilterConfig{
+			AllowDomains: cfg.Security.URLFilter.AllowDomains,
+			DenyDomains:  cfg.Security.URLFilter.DenyDomains,
+		})
+		appCtx.RegisterService("security.urlfilter", urlFilter)
+	}
+
 	application := core.NewApp(appCtx)
 	ids := config.Resolve(cfg)
 	if err := application.LoadModules(ids); err != nil {
 		return err
 	}
 
+	// Build and register the reload handler BEFORE Start so gateway can use it.
+	handler := reload.NewHandler(application, logger, dataDir, workspace)
+	appCtx.RegisterService("reload.handler", handler)
+
 	if err := application.Start(); err != nil {
 		return err
 	}
+
+	// Sync the redactor with all credentials registered by modules during Start.
+	// This ensures runtime secrets (e.g. API keys loaded from env by modules)
+	// are redacted from logs going forward.
+	redactor.SyncCredentials(credStore)
+
+	// Build sanitized environment after modules have registered their credentials,
+	// and make it available for tool execution via service lookup.
+	appCtx.RegisterService("security.sanitized_env", security.SanitizedEnv(credStore))
 
 	// --- signal handling ---
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(sigCh)
-
-	// --- reload handler ---
-	handler := reload.NewHandler(application, logger, dataDir, workspace)
 
 	// --- file watcher ---
 	watcher := reload.NewWatcher(reload.WatcherConfig{

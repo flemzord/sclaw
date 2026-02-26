@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/hook"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -29,6 +30,16 @@ type Config struct {
 	// HookPipeline runs hooks at before_process, before_send, and after_send.
 	// Nil → no hooks (backward compatible).
 	HookPipeline *hook.Pipeline
+
+	// RateLimiter, if non-nil, enforces message and session rate limits.
+	RateLimiter *security.RateLimiter
+
+	// MaxMessageSize is the maximum allowed message size in bytes.
+	// Zero means use the default (1 MiB).
+	MaxMessageSize int
+
+	// MaxSessions limits the number of concurrent sessions. Zero means unlimited.
+	MaxSessions int
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -79,6 +90,9 @@ func NewRouter(cfg Config) (*Router, error) {
 	}
 
 	store := NewInMemorySessionStore()
+	if cfg.MaxSessions > 0 {
+		store.SetMaxSessions(cfg.MaxSessions)
+	}
 	laneLock := NewLaneLock()
 	approvalMgr := NewApprovalManager()
 	pruner := newLazyPruner(store, laneLock, cfg.MaxIdle)
@@ -145,6 +159,37 @@ func (r *Router) Submit(msg message.InboundMessage) error {
 			return nil
 		}
 		r.logger.Warn("router: approval not found or already resolved", "approval_id", id)
+	}
+
+	// Validate message size and JSON depth at the system boundary.
+	if len(msg.Raw) > 0 {
+		if err := security.ValidateMessageSize(msg.Raw, r.config.MaxMessageSize); err != nil {
+			r.logger.Warn("router: message too large, rejected",
+				"size", len(msg.Raw),
+				"channel", msg.Channel,
+			)
+			return err
+		}
+		if err := security.ValidateJSONDepth(msg.Raw, 0); err != nil {
+			r.logger.Warn("router: message JSON too deep, rejected",
+				"channel", msg.Channel,
+			)
+			return err
+		}
+	}
+
+	// Rate limit check for messages.
+	// TODO: Current rate limiting is global (all users share one bucket).
+	// Consider implementing per-session or per-user rate limiting to prevent
+	// a single user from exhausting the quota for all others.
+	if r.config.RateLimiter != nil {
+		if err := r.config.RateLimiter.Allow("message"); err != nil {
+			r.logger.Warn("router: message rate limited",
+				"channel", msg.Channel,
+				"chat_id", msg.Chat.ID,
+			)
+			return err
+		}
 	}
 
 	key := SessionKeyFromMessage(msg)

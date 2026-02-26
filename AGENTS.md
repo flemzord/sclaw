@@ -9,14 +9,37 @@ Repository: `https://github.com/flemzord/sclaw`
 ## Architecture
 
 ```
-cmd/sclaw/main.go   → Entry point
-internal/           → Private packages (not importable)
-  internal/config/  → Configuration loading and validation
-  internal/core/    → Module system and registry
-  internal/provider/→ Provider interface, failover chain, health tracking
-pkg/                → Public reusable packages
-  pkg/message/      → Platform-agnostic message model
-docs/               → Additional documentation
+cmd/sclaw/main.go     → Entry point
+cmd/xsclaw/           → Build & distribution tooling
+internal/             → Private packages (not importable)
+  internal/agent/     → ReAct reasoning loop
+  internal/bootstrap/ → Plugin hot-reload detection + rebuild
+  internal/cert/      → Plugin certificate signing/verification
+  internal/channel/   → Platform adapters (Telegram, Discord, etc.)
+  internal/config/    → Configuration loading and validation
+  internal/context/   → LLM context management (token budget, compaction)
+  internal/core/      → Module system and registry
+  internal/cron/      → Scheduled tasks
+  internal/gateway/   → HTTP server (admin, webhooks, health)
+  internal/heartbeat/ → Monitoring and notifications
+  internal/hook/      → Message pipeline hooks (audit, filtering)
+  internal/memory/    → Conversation history management
+  internal/multiagent/→ Multi-agent configuration and routing
+  internal/node/      → Remote device connections (WebSocket)
+  internal/provider/  → Provider interface, failover chain, health tracking
+  internal/reload/    → Hot configuration reload
+  internal/router/    → Central message dispatch + session management
+  internal/security/  → Security hardening (credentials, redaction, audit,
+                        rate limiting, validation, env sanitization,
+                        sandboxing, URL filtering)
+  internal/subagent/  → Ephemeral sub-agent sessions
+  internal/tool/      → Tool registry + approval system
+  internal/workspace/ → Working directory management
+pkg/                  → Public reusable packages
+  pkg/app/            → Shared entry point (Run, ResolveConfigPath)
+  pkg/message/        → Platform-agnostic message model
+docs/                 → Additional documentation
+  docs/security/      → Security documentation
 ```
 
 ## Development Environment
@@ -79,10 +102,40 @@ run-tests  # Run tests with race detector + coverage
 - **Never reimplement stdlib**: Prefer `strings.TrimSpace`, `strings.Contains`, `strings.Split` over custom equivalents. Custom helpers miss edge cases (e.g., `\v`, `\f` whitespace characters).
 - **Consecutive error circuit breaker**: Background loops that call external services (typing indicators, health checks) should stop after N consecutive errors instead of retrying indefinitely until context cancellation.
 
+### Security
+
+- **Never pass secrets to LLM context**: Use `CredentialStore` via `context.Context`, never embed secrets in system prompts or tool outputs.
+- **Redact before logging**: All logging goes through `RedactingHandler`; never use `fmt.Println` or raw `slog` for secret-bearing data.
+- **Sanitize subprocess environment**: Always use `security.SanitizedEnv()` instead of `os.Environ()` when spawning subprocesses.
+- **Default-deny for external access**: Empty allow-lists block everything; URL filters and sandbox policies require explicit opt-in.
+- **Validate at system boundaries**: Check message size and JSON depth on ingress (router, webhook); trust internal data after validation.
+
 ### Testing
 
 - **Never export test helpers in production packages**: Use unexported functions with `_test` build tags, or place helpers in a dedicated `<package>test/` sub-package (e.g., `providertest/`).
 - **Clean up provisioned resources**: If a module acquires resources during provisioning (DB connections, files, goroutines), ensure there is a cleanup path. Test teardown must not leak.
+
+## Security
+
+sclaw implements defense-in-depth security across the entire message pipeline:
+
+| Layer | Mechanism | Package |
+|-------|-----------|---------|
+| Credential management | `CredentialStore` with context injection — secrets never in LLM prompts | `internal/security/credentials.go` |
+| Log redaction | `RedactingHandler` wraps `slog.Handler`, redacts all string attributes | `internal/security/sloghandler.go` |
+| Pattern detection | `Redactor` with compiled regex for OpenAI, Anthropic, GitHub, AWS, Slack keys | `internal/security/redactor.go` |
+| Rate limiting | Sliding window counters for sessions, messages, tool calls, tokens | `internal/security/ratelimit.go` |
+| Input validation | Message size limits + JSON depth checking at system boundaries | `internal/security/validation.go` |
+| Subprocess sanitization | `SanitizedEnv()` strips sensitive env vars before `syscall.Exec` | `internal/security/env.go` |
+| Tool sandboxing | Docker-based execution with resource limits for exec/read_write scopes | `internal/security/sandbox.go` |
+| URL filtering | Default-deny domain allow/deny lists for network tools | `internal/security/urlfilter.go` |
+| Audit logging | JSONL audit trail covering messages, tool calls, auth, config changes | `internal/security/audit.go` |
+| Session isolation | Lane locks + cross-session ParentID validation | `internal/router/`, `internal/subagent/` |
+| Auth middleware | Bearer + Basic auth with constant-time comparison | `internal/gateway/auth.go` |
+| Webhook validation | HMAC-SHA256 signature verification per source | `internal/gateway/webhook.go` |
+| Plugin certification | Ed25519 signature verification with trusted key list | `internal/cert/` |
+
+See `docs/security/prompt-injection.md` for the full threat model and mitigation details.
 
 ## CI/CD
 

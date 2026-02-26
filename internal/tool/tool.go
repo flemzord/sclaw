@@ -6,6 +6,8 @@ package tool
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 // Scope declares what kind of access a tool requires.
@@ -52,6 +54,13 @@ type ExecutionEnv struct {
 
 	// DataDir is the persistent data directory for the tool.
 	DataDir string
+
+	// SanitizedEnv, if non-nil, provides a pre-sanitized set of environment
+	// variables for tools that need to spawn subprocesses.
+	SanitizedEnv []string
+
+	// URLFilter, if non-nil, restricts which URLs network tools can access.
+	URLFilter *security.URLFilter
 }
 
 // Output is the result of a tool execution.
