@@ -146,9 +146,8 @@ func TestValidate_ConfigurableModuleMissingConfig(t *testing.T) {
 }
 
 func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
-	// After removing the strict check (which required ALL registered
-	// Configurable modules to have config entries), a configurable module
-	// that is not listed in config is simply not loaded. No error expected.
+	// Configurable modules NOT listed in config are simply not loaded.
+	// The strict check was removed — no error expected.
 	cfgID := t.Name() + ".config"
 	stubID := t.Name() + ".other"
 	registerConfigurable(t, cfgID)
