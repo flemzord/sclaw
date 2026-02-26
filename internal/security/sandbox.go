@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -93,7 +95,7 @@ func NewSandboxExecutor(policy SandboxPolicy, limits ResourceLimits, image strin
 		limits.Timeout = defaults.Timeout
 	}
 	if image == "" {
-		image = "alpine:latest"
+		image = "alpine:3.19"
 	}
 
 	return &SandboxExecutor{
@@ -117,13 +119,24 @@ func (s *SandboxExecutor) Execute(ctx context.Context, command string, workdir s
 		defer cancel()
 	}
 
+	if workdir != "" {
+		cleaned := filepath.Clean(workdir)
+		if strings.Contains(cleaned, ":") {
+			return nil, fmt.Errorf("sandbox: workdir contains invalid character: %q", workdir)
+		}
+	}
+
 	args := []string{
 		"run", "--rm",
 		"--read-only",
 		"--network=none",
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges:true",
+		"--user", "65534:65534",
+		"--pids-limit", "256",
 		"--cpu-shares", strconv.Itoa(s.limits.CPUShares),
 		"--memory", strconv.Itoa(s.limits.MemoryMB) + "m",
-		"--tmpfs", "/tmp:rw,size=" + strconv.Itoa(s.limits.DiskMB) + "m",
+		"--tmpfs", "/tmp:rw,noexec,nosuid,size=" + strconv.Itoa(s.limits.DiskMB) + "m",
 	}
 
 	if workdir != "" {

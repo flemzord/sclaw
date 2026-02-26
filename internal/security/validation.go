@@ -1,6 +1,7 @@
 package security
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func ValidateJSONDepth(data []byte, limit int) error {
 		return nil
 	}
 
-	dec := json.NewDecoder(bytesReader(data))
+	dec := json.NewDecoder(bytes.NewReader(data))
 	depth := 0
 
 	for {
@@ -65,27 +66,4 @@ func ValidateJSONDepth(data []byte, limit int) error {
 			depth--
 		}
 	}
-}
-
-// bytesReader wraps a byte slice as an io.Reader without importing bytes
-// to keep the dependency footprint minimal (json.NewDecoder needs io.Reader).
-type bytesReaderImpl struct {
-	data []byte
-	pos  int
-}
-
-func bytesReader(data []byte) *bytesReaderImpl {
-	return &bytesReaderImpl{data: data}
-}
-
-func (r *bytesReaderImpl) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	if r.pos >= len(r.data) {
-		return n, io.EOF
-	}
-	return n, nil
 }
