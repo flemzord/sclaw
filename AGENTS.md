@@ -21,11 +21,9 @@ internal/             → Private packages (not importable)
   internal/core/      → Module system and registry
   internal/cron/      → Scheduled tasks
   internal/gateway/   → HTTP server (admin, webhooks, health)
-  internal/heartbeat/ → Monitoring and notifications
   internal/hook/      → Message pipeline hooks (audit, filtering)
   internal/memory/    → Conversation history management
   internal/multiagent/→ Multi-agent configuration and routing
-  internal/node/      → Remote device connections (WebSocket)
   internal/provider/  → Provider interface, failover chain, health tracking
   internal/reload/    → Hot configuration reload
   internal/router/    → Central message dispatch + session management

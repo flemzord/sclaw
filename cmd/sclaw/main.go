@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	_ "github.com/flemzord/sclaw/internal/gateway"
-	_ "github.com/flemzord/sclaw/internal/node"
 	_ "github.com/flemzord/sclaw/modules/channel/telegram"
 	_ "github.com/flemzord/sclaw/modules/memory/sqlite"
 	_ "github.com/flemzord/sclaw/modules/provider/openai_compatible"

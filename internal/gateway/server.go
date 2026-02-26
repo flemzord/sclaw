@@ -16,13 +16,6 @@ func (g *Gateway) buildRouter() http.Handler {
 	// Webhooks — own HMAC auth per source.
 	r.Post("/webhooks/{source}", g.dispatcher.ServeHTTP)
 
-	// Node WebSocket — device connections (pairing token auth, not bearer).
-	if svc, ok := g.appCtx.GetService("node.handler"); ok {
-		if handler, ok := svc.(http.Handler); ok {
-			r.Handle("/ws/node", handler)
-		}
-	}
-
 	// Admin endpoints — auth required. Not mounted if no auth configured.
 	if g.config.Auth.IsConfigured() {
 		r.Group(func(r chi.Router) {
