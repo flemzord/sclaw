@@ -14,6 +14,7 @@ import (
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
+	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/modules/memory/sqlite"
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -43,12 +44,13 @@ type FactoryConfig struct {
 
 // Factory resolves the agent for a session and creates an agent.Loop
 // with the correct provider, tools, and workspace. It also acts as a
-// HistoryResolver, lazily opening per-agent SQLite databases.
+// HistoryResolver and SoulResolver, lazily opening per-agent resources.
 type Factory struct {
 	cfg FactoryConfig
 
 	mu     sync.RWMutex
 	stores map[string]memory.HistoryStore
+	souls  map[string]workspace.SoulProvider
 	dbs    []*sql.DB
 }
 
@@ -56,6 +58,7 @@ type Factory struct {
 var (
 	_ router.AgentFactory    = (*Factory)(nil)
 	_ router.HistoryResolver = (*Factory)(nil)
+	_ router.SoulResolver    = (*Factory)(nil)
 )
 
 // NewFactory creates a Factory from the given configuration.
@@ -63,6 +66,7 @@ func NewFactory(cfg FactoryConfig) *Factory {
 	return &Factory{
 		cfg:    cfg,
 		stores: make(map[string]memory.HistoryStore),
+		souls:  make(map[string]workspace.SoulProvider),
 	}
 }
 
@@ -197,6 +201,37 @@ func (f *Factory) ResolveHistory(agentID string) memory.HistoryStore {
 			"agent", agentID, "path", dbPath)
 	}
 	return store
+}
+
+// ResolveSoul returns the system prompt for the given agent.
+// The SoulLoader is lazily created on first access and cached for subsequent calls.
+// Returns the default prompt if the agent has no DataDir or no SOUL.md file.
+func (f *Factory) ResolveSoul(agentID string) (string, error) {
+	// Fast path: read lock.
+	f.mu.RLock()
+	if loader, ok := f.souls[agentID]; ok {
+		f.mu.RUnlock()
+		return loader.Load()
+	}
+	f.mu.RUnlock()
+
+	// Slow path: write lock + double-check.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if loader, ok := f.souls[agentID]; ok {
+		return loader.Load()
+	}
+
+	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	if !ok || agentCfg.DataDir == "" {
+		return workspace.DefaultSoulPrompt, nil
+	}
+
+	soulPath := filepath.Join(agentCfg.DataDir, "SOUL.md")
+	loader := workspace.NewSoulLoader(soulPath)
+	f.souls[agentID] = loader
+	return loader.Load()
 }
 
 // Close closes all SQLite databases opened by ResolveHistory.

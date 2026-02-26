@@ -9,6 +9,7 @@ import (
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/security"
+	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -47,6 +48,10 @@ type PipelineConfig struct {
 	// When set, history is restored from SQLite on new sessions and
 	// persisted after each user/assistant message (write-behind, non-fatal).
 	HistoryResolver HistoryResolver
+
+	// SoulResolver, if non-nil, provides per-agent system prompts loaded
+	// from SOUL.md files. Nil means use the default prompt (backward compatible).
+	SoulResolver SoulResolver
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -197,10 +202,18 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	// Step 9: Context — build agent request.
-	// Partial placeholder: uses a hardcoded system prompt for now.
+	systemPrompt := workspace.DefaultSoulPrompt
+	if p.cfg.SoulResolver != nil && session.AgentID != "" {
+		if s, err := p.cfg.SoulResolver.ResolveSoul(session.AgentID); err == nil {
+			systemPrompt = s
+		} else {
+			logger.Warn("pipeline: failed to load soul prompt",
+				"session_id", session.ID, "agent_id", session.AgentID, "error", err)
+		}
+	}
 	req := agent.Request{
 		Messages:     session.History,
-		SystemPrompt: "You are a helpful assistant.", // Placeholder — will come from config/context engine.
+		SystemPrompt: systemPrompt,
 	}
 
 	// Step 9b: Typing indicator — show "typing..." while agent processes.

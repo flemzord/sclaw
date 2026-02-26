@@ -137,6 +137,7 @@ func wireRouter(
 		Logger:          logger,
 		RateLimiter:     rateLimiter,
 		HistoryResolver: factory,
+		SoulResolver:    factory,
 	})
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)

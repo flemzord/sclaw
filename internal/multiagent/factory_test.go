@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -484,5 +485,157 @@ func TestFactory_Close(t *testing.T) {
 	factory.mu.RUnlock()
 	if n != 0 {
 		t.Errorf("stores map has %d entries after Close, want 0", n)
+	}
+}
+
+func TestFactory_ResolveSoul_LoadsFromFile(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"persona": {
+			DataDir: filepath.Join(tmpDir, "agents", "persona"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"persona"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	// Write a SOUL.md file.
+	soulPath := filepath.Join(agents["persona"].DataDir, "SOUL.md")
+	if err := os.WriteFile(soulPath, []byte("You are a pirate captain."), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+
+	prompt, err := factory.ResolveSoul("persona")
+	if err != nil {
+		t.Fatalf("ResolveSoul: %v", err)
+	}
+	if prompt != "You are a pirate captain." {
+		t.Errorf("prompt = %q, want %q", prompt, "You are a pirate captain.")
+	}
+}
+
+func TestFactory_ResolveSoul_DefaultWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"plain": {
+			DataDir: filepath.Join(tmpDir, "agents", "plain"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"plain"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+
+	prompt, err := factory.ResolveSoul("plain")
+	if err != nil {
+		t.Fatalf("ResolveSoul: %v", err)
+	}
+	if prompt != "You are a helpful assistant." {
+		t.Errorf("prompt = %q, want default", prompt)
+	}
+}
+
+func TestFactory_ResolveSoul_Cached(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"cached": {
+			DataDir: filepath.Join(tmpDir, "agents", "cached"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"cached"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+
+	// First call creates the loader.
+	_, err = factory.ResolveSoul("cached")
+	if err != nil {
+		t.Fatalf("first ResolveSoul: %v", err)
+	}
+
+	// Verify the loader is cached.
+	factory.mu.RLock()
+	_, exists := factory.souls["cached"]
+	factory.mu.RUnlock()
+	if !exists {
+		t.Error("expected soul loader to be cached after first call")
+	}
+
+	// Second call should reuse the cached loader.
+	_, err = factory.ResolveSoul("cached")
+	if err != nil {
+		t.Fatalf("second ResolveSoul: %v", err)
+	}
+
+	// Verify still only one entry in the cache.
+	factory.mu.RLock()
+	n := len(factory.souls)
+	factory.mu.RUnlock()
+	if n != 1 {
+		t.Errorf("souls cache has %d entries, want 1", n)
+	}
+}
+
+func TestFactory_ResolveSoul_UnknownAgent(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"known": {
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"known"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+
+	prompt, err := factory.ResolveSoul("ghost")
+	if err != nil {
+		t.Fatalf("ResolveSoul: %v", err)
+	}
+	if prompt != "You are a helpful assistant." {
+		t.Errorf("prompt = %q, want default for unknown agent", prompt)
 	}
 }

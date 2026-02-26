@@ -45,6 +45,10 @@ type Config struct {
 	// HistoryResolver, if non-nil, provides per-agent persistent history storage.
 	// Nil means no persistence (backward compatible).
 	HistoryResolver HistoryResolver
+
+	// SoulResolver, if non-nil, provides per-agent system prompts from SOUL.md.
+	// Nil means use the default prompt (backward compatible).
+	SoulResolver SoulResolver
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -114,6 +118,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		Logger:          cfg.Logger,
 		HookPipeline:    cfg.HookPipeline,
 		HistoryResolver: cfg.HistoryResolver,
+		SoulResolver:    cfg.SoulResolver,
 	})
 
 	return &Router{

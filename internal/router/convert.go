@@ -21,6 +21,12 @@ type HistoryResolver interface {
 	ResolveHistory(agentID string) memory.HistoryStore
 }
 
+// SoulResolver returns the system prompt for a given agent.
+// Returns the default prompt if the agent has no SOUL.md.
+type SoulResolver interface {
+	ResolveSoul(agentID string) (string, error)
+}
+
 // persistenceKey derives a stable key from a SessionKey for history persistence.
 // The key survives session recreation (new UUID) because it is based on the
 // immutable channel/chat/thread triple.

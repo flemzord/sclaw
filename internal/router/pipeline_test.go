@@ -779,6 +779,123 @@ func (f *agentIDSettingFactory) ForSession(session *Session, msg message.Inbound
 	return f.inner.ForSession(session, msg)
 }
 
+// testSoulResolver is a simple in-test mock for SoulResolver.
+type testSoulResolver struct {
+	prompt string
+	err    error
+}
+
+func (r *testSoulResolver) ResolveSoul(_ string) (string, error) {
+	return r.prompt, r.err
+}
+
+func TestPipeline_SoulResolver_UsesCustomPrompt(t *testing.T) {
+	t.Parallel()
+
+	var capturedMessages []provider.LLMMessage
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
+			capturedMessages = req.Messages
+			return provider.CompletionResponse{
+				Content:      "Ahoy!",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	soulResolver := &testSoulResolver{prompt: "You are a pirate captain."}
+
+	// Factory that sets AgentID so the SoulResolver is invoked.
+	agentFactory := &agentIDSettingFactory{
+		inner:   &testAgentFactory{loop: loop},
+		agentID: "pirate",
+	}
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    agentFactory,
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		SoulResolver:    soulResolver,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	// The agent loop prepends the system prompt as the first message.
+	if len(capturedMessages) < 1 {
+		t.Fatal("expected at least 1 message sent to provider")
+	}
+	if capturedMessages[0].Role != provider.MessageRoleSystem {
+		t.Errorf("first message role = %q, want %q", capturedMessages[0].Role, provider.MessageRoleSystem)
+	}
+	if capturedMessages[0].Content != "You are a pirate captain." {
+		t.Errorf("system prompt = %q, want %q", capturedMessages[0].Content, "You are a pirate captain.")
+	}
+}
+
+func TestPipeline_SoulResolver_Nil(t *testing.T) {
+	t.Parallel()
+
+	var capturedMessages []provider.LLMMessage
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
+			capturedMessages = req.Messages
+			return provider.CompletionResponse{
+				Content:      "OK",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// SoulResolver is nil — pipeline should use default prompt, not panic.
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		SoulResolver:    nil,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	// The agent loop prepends the system prompt as the first message.
+	if len(capturedMessages) < 1 {
+		t.Fatal("expected at least 1 message sent to provider")
+	}
+	if capturedMessages[0].Role != provider.MessageRoleSystem {
+		t.Errorf("first message role = %q, want %q", capturedMessages[0].Role, provider.MessageRoleSystem)
+	}
+	if capturedMessages[0].Content != "You are a helpful assistant." {
+		t.Errorf("system prompt = %q, want default %q", capturedMessages[0].Content, "You are a helpful assistant.")
+	}
+}
+
 func TestPipeline_HistoryResolver_Nil(t *testing.T) {
 	t.Parallel()
 

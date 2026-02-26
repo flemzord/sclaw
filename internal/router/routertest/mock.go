@@ -140,10 +140,24 @@ func (m *MockHistoryResolver) ResolveHistory(agentID string) memory.HistoryStore
 	return nil
 }
 
+// MockSoulResolver provides a controllable SoulResolver for tests.
+type MockSoulResolver struct {
+	ResolveSoulFunc func(agentID string) (string, error)
+}
+
+// ResolveSoul delegates to ResolveSoulFunc if set, otherwise returns the default prompt.
+func (m *MockSoulResolver) ResolveSoul(agentID string) (string, error) {
+	if m.ResolveSoulFunc != nil {
+		return m.ResolveSoulFunc(agentID)
+	}
+	return "You are a helpful assistant.", nil
+}
+
 // Interface guards.
 var (
 	_ router.ResponseSender  = (*MockResponseSender)(nil)
 	_ router.AgentFactory    = (*MockAgentFactory)(nil)
 	_ router.SessionStore    = (*MockSessionStore)(nil)
 	_ router.HistoryResolver = (*MockHistoryResolver)(nil)
+	_ router.SoulResolver    = (*MockSoulResolver)(nil)
 )
