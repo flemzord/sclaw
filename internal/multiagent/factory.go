@@ -115,9 +115,13 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 	toolReg := f.buildToolRegistry(agentCfg)
 
 	// Register sub-agent tools so the session can spawn/manage sub-agents.
+	// Skip if already registered (ForSession is called per-message and the
+	// global tool registry persists across calls).
 	if f.subAgentMgr != nil {
-		if err := subagent.RegisterTools(toolReg, f.subAgentMgr, session.AgentID, session.ID, false); err != nil {
-			return nil, fmt.Errorf("multiagent: registering subagent tools for session %s: %w", session.ID, err)
+		if _, err := toolReg.Get("sessions_list"); err != nil {
+			if err := subagent.RegisterTools(toolReg, f.subAgentMgr, session.AgentID, session.ID, false); err != nil {
+				return nil, fmt.Errorf("multiagent: registering subagent tools for session %s: %w", session.ID, err)
+			}
 		}
 	}
 
