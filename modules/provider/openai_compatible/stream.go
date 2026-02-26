@@ -56,9 +56,7 @@ func (ta *toolAccumulator) add(st oaiStreamTool) {
 		tc.Name = st.Function.Name
 	}
 	if st.Function.Arguments != "" {
-		tc.Arguments = json.RawMessage(
-			string(tc.Arguments) + st.Function.Arguments,
-		)
+		tc.Arguments = append(tc.Arguments, st.Function.Arguments...)
 	}
 }
 
@@ -96,7 +94,11 @@ func (p *Provider) parseSSEStream(ctx context.Context, scanner *bufio.Scanner) <
 
 		for scanner.Scan() {
 			if err := ctx.Err(); err != nil {
-				ch <- provider.StreamChunk{Err: err}
+				select {
+				case ch <- provider.StreamChunk{Err: err}:
+				case <-ctx.Done():
+					return
+				}
 				return
 			}
 
@@ -118,15 +120,23 @@ func (p *Provider) parseSSEStream(ctx context.Context, scanner *bufio.Scanner) <
 			if data == "[DONE]" {
 				// Emit final tool calls if accumulated.
 				if tcs := tools.result(); len(tcs) > 0 {
-					ch <- provider.StreamChunk{ToolCalls: tcs}
+					select {
+					case ch <- provider.StreamChunk{ToolCalls: tcs}:
+					case <-ctx.Done():
+						return
+					}
 				}
 				return
 			}
 
 			var chunk oaiStreamChunk
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-				ch <- provider.StreamChunk{
+				select {
+				case ch <- provider.StreamChunk{
 					Err: fmt.Errorf("parse SSE chunk: %w", err),
+				}:
+				case <-ctx.Done():
+					return
 				}
 				return
 			}
@@ -159,7 +169,21 @@ func (p *Provider) parseSSEStream(ctx context.Context, scanner *bufio.Scanner) <
 
 			// Only emit if there is actual content or a finish reason.
 			if sc.Content != "" || sc.FinishReason != "" || sc.Usage != nil {
-				ch <- sc
+				select {
+				case ch <- sc:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+
+		// Emit accumulated tool calls even if [DONE] was never received.
+		// Some providers close the connection without sending [DONE].
+		if tcs := tools.result(); len(tcs) > 0 {
+			select {
+			case ch <- provider.StreamChunk{ToolCalls: tcs}:
+			case <-ctx.Done():
+				return
 			}
 		}
 
@@ -167,10 +191,18 @@ func (p *Provider) parseSSEStream(ctx context.Context, scanner *bufio.Scanner) <
 		if err := scanner.Err(); err != nil {
 			// Do not classify context cancellation as provider failure.
 			if ctx.Err() != nil {
-				ch <- provider.StreamChunk{Err: ctx.Err()}
+				select {
+				case ch <- provider.StreamChunk{Err: ctx.Err()}:
+				case <-ctx.Done():
+					return
+				}
 			} else {
-				ch <- provider.StreamChunk{
+				select {
+				case ch <- provider.StreamChunk{
 					Err: fmt.Errorf("%w: stream read error: %w", provider.ErrProviderDown, err),
+				}:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
