@@ -4,34 +4,9 @@ package core
 import (
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 )
-
-// serviceRegistry is a concurrent-safe container for cross-module service discovery.
-// Modules register services during Provision() and look them up during Start().
-type serviceRegistry struct {
-	mu       sync.RWMutex
-	services map[string]any
-}
-
-func newServiceRegistry() *serviceRegistry {
-	return &serviceRegistry{services: make(map[string]any)}
-}
-
-func (r *serviceRegistry) set(name string, svc any) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.services[name] = svc
-}
-
-func (r *serviceRegistry) get(name string) (any, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	svc, ok := r.services[name]
-	return svc, ok
-}
 
 // AppContext carries shared resources available to modules during provisioning
 // and at runtime.
@@ -47,7 +22,7 @@ type AppContext struct {
 
 	parentLogger  *slog.Logger
 	moduleConfigs map[string]yaml.Node
-	registry      *serviceRegistry
+	services      map[string]interface{}
 }
 
 // NewAppContext creates a new AppContext with the given base logger and directories.
@@ -60,19 +35,7 @@ func NewAppContext(logger *slog.Logger, dataDir, workspace string) *AppContext {
 		DataDir:      dataDir,
 		Workspace:    workspace,
 		parentLogger: logger,
-		registry:     newServiceRegistry(),
 	}
-}
-
-// RegisterService stores a named service in the shared registry.
-// Services registered during Provision() are available to all modules at Start().
-func (ctx *AppContext) RegisterService(name string, svc any) {
-	ctx.registry.set(name, svc)
-}
-
-// Service retrieves a named service from the shared registry.
-func (ctx *AppContext) Service(name string) (any, bool) {
-	return ctx.registry.get(name)
 }
 
 // WithModuleConfigs returns a copy of the AppContext with module configurations set.
@@ -92,8 +55,33 @@ func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
 		Workspace:     ctx.Workspace,
 		parentLogger:  ctx.parentLogger,
 		moduleConfigs: ctx.moduleConfigs,
-		registry:      ctx.registry,
+		services:      ctx.services,
 	}
+}
+
+// RegisterService registers a named service in the context.
+// If a service with the same name already exists, it logs a warning
+// and overwrites the previous registration (m-52).
+func (ctx *AppContext) RegisterService(name string, svc interface{}) {
+	if ctx.services == nil {
+		ctx.services = make(map[string]interface{})
+	}
+	if _, exists := ctx.services[name]; exists {
+		ctx.Logger.Warn("duplicate service registration, overwriting",
+			"service", name,
+		)
+	}
+	ctx.services[name] = svc
+}
+
+// GetService retrieves a registered service by name.
+// Returns nil and false if the service is not found.
+func (ctx *AppContext) GetService(name string) (interface{}, bool) {
+	if ctx.services == nil {
+		return nil, false
+	}
+	svc, ok := ctx.services[name]
+	return svc, ok
 }
 
 // LoadModule instantiates and provisions a module by its ID.

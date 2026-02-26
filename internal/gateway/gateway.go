@@ -91,12 +91,12 @@ func (g *Gateway) Validate() error {
 // registry (lazy binding) and starts the HTTP server.
 func (g *Gateway) Start() error {
 	// Resolve optional services — graceful degradation if missing.
-	if svc, ok := g.appCtx.Service("router.sessions"); ok {
+	if svc, ok := g.appCtx.GetService("router.sessions"); ok {
 		if store, ok := svc.(router.SessionStore); ok {
 			g.sessions = store
 		}
 	}
-	if svc, ok := g.appCtx.Service("provider.chain"); ok {
+	if svc, ok := g.appCtx.GetService("provider.chain"); ok {
 		if chain, ok := svc.(*provider.Chain); ok {
 			g.chain = chain
 		}

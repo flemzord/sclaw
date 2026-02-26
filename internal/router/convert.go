@@ -10,6 +10,9 @@ import (
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
+// Compile-time check that sessionViewAdapter implements hook.SessionView.
+var _ hook.SessionView = (*sessionViewAdapter)(nil)
+
 // ResponseSender delivers outbound messages to a channel.
 type ResponseSender interface {
 	Send(ctx context.Context, msg message.OutboundMessage) error
@@ -37,27 +40,38 @@ func buildOutbound(original message.InboundMessage, resp agent.Response) message
 	return out
 }
 
-// sessionViewAdapter wraps a *Session to implement hook.SessionView.
-// This breaks the router→hook circular dependency by providing read-only
-// session access without exposing the full Session struct.
-type sessionViewAdapter struct{ s *Session }
-
-// Compile-time interface check.
-var _ hook.SessionView = (*sessionViewAdapter)(nil)
-
-func (a *sessionViewAdapter) SessionID() string { return a.s.ID }
-
-func (a *sessionViewAdapter) SessionKey() (string, string, string) {
-	return a.s.Key.Channel, a.s.Key.ChatID, a.s.Key.ThreadID
+// sessionViewAdapter provides a read-only view of a Session for use by hooks.
+// It exists to decouple hook implementations from the internal Session type.
+type sessionViewAdapter struct {
+	session *Session
 }
 
-func (a *sessionViewAdapter) AgentID() string      { return a.s.AgentID }
-func (a *sessionViewAdapter) CreatedAt() time.Time { return a.s.CreatedAt }
+// SessionID returns the session identifier.
+func (a *sessionViewAdapter) SessionID() string {
+	return a.session.ID
+}
 
+// SessionKey returns the channel, chatID, and threadID for the session.
+func (a *sessionViewAdapter) SessionKey() (channel, chatID, threadID string) {
+	return a.session.Key.Channel, a.session.Key.ChatID, a.session.Key.ThreadID
+}
+
+// AgentID returns the agent assigned to this session.
+func (a *sessionViewAdapter) AgentID() string {
+	return a.session.AgentID
+}
+
+// CreatedAt returns when the session was created.
+func (a *sessionViewAdapter) CreatedAt() time.Time {
+	return a.session.CreatedAt
+}
+
+// GetMetadata returns a shallow copy of a single metadata value to prevent
+// callers from mutating the session's internal state (m-30 fix).
 func (a *sessionViewAdapter) GetMetadata(key string) (any, bool) {
-	if a.s.Metadata == nil {
+	if a.session.Metadata == nil {
 		return nil, false
 	}
-	v, ok := a.s.Metadata[key]
+	v, ok := a.session.Metadata[key]
 	return v, ok
 }

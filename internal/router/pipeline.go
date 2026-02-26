@@ -3,12 +3,10 @@ package router
 import (
 	"context"
 	"log/slog"
-	"strings"
 
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
-	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -26,27 +24,13 @@ type PipelineConfig struct {
 	AgentFactory    AgentFactory
 	ResponseSender  ResponseSender
 	Pruner          *lazyPruner
+	HookPipeline    *hook.Pipeline
 	Logger          *slog.Logger
 
 	// MaxHistoryLen caps the number of LLM messages kept in a session's
 	// history. When exceeded, the oldest entries are trimmed. Zero means
 	// use the default (100).
 	MaxHistoryLen int
-
-	// SoulProvider loads the agent personality prompt (SOUL.md).
-	// Nil → DefaultSoulPrompt.
-	SoulProvider workspace.SoulProvider
-
-	// SkillActivator selects which skills to include in the prompt.
-	// Nil → no skills.
-	SkillActivator *workspace.SkillActivator
-
-	// Skills are the loaded skill definitions (from the workspace skills dir).
-	Skills []workspace.Skill
-
-	// HookPipeline runs hooks at before_process, before_send, and after_send.
-	// Nil → no hooks (all hook steps become no-ops for backward compatibility).
-	HookPipeline *hook.Pipeline
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -108,26 +92,31 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Skipped: true}
 	}
 
-	// Step 5: Hook before-process — intercept/drop messages.
-	// hookMeta is shared across all 3 hook positions within this execution.
+	// Step 5: Lane lock acquire (step 15 releases via defer).
+	// C-13 fix: Lane lock is acquired BEFORE hook before_process so that
+	// the session pointer is protected by the lane lock when hooks access it.
+	p.cfg.LaneLock.Acquire(env.Key)
+	defer p.cfg.LaneLock.Release(env.Key) // Step 15
+
+	// Step 6: Hook before-process — run after lane lock acquisition (C-13 fix).
 	hookMeta := make(map[string]any)
 	if p.cfg.HookPipeline != nil {
 		hctx := &hook.Context{
 			Position: hook.BeforeProcess,
 			Inbound:  env.Message,
-			Session:  &sessionViewAdapter{s: session},
+			Session:  &sessionViewAdapter{session: session},
 			Metadata: hookMeta,
 			Logger:   logger,
 		}
-		action, _ := p.cfg.HookPipeline.RunBeforeProcess(ctx, hctx)
+		// m-29: Log the error if non-nil instead of ignoring it.
+		action, err := p.cfg.HookPipeline.RunBeforeProcess(ctx, hctx)
+		if err != nil {
+			logger.Warn("pipeline: hook before_process error", "error", err)
+		}
 		if action == hook.ActionDrop {
 			return PipelineResult{Session: session, Skipped: true}
 		}
 	}
-
-	// Step 6: Lane lock acquire (step 15 releases via defer).
-	p.cfg.LaneLock.Acquire(env.Key)
-	defer p.cfg.LaneLock.Release(env.Key) // Step 15
 
 	// Step 7: Agent resolution — get or create agent loop for this session.
 	// Called after lane lock acquisition to avoid a data race on the live
@@ -148,10 +137,10 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	// Step 9: Context — build agent request.
-	systemParts := p.buildSystemParts(env.Message)
+	// Partial placeholder: uses a hardcoded system prompt for now.
 	req := agent.Request{
 		Messages:     session.History,
-		SystemPrompt: strings.Join(systemParts, "\n\n"),
+		SystemPrompt: "You are a helpful assistant.", // Placeholder — will come from config/context engine.
 	}
 
 	// Step 10: Agent loop — run the agent.
@@ -162,19 +151,21 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Error: err}
 	}
 
-	// Step 11: Hook before-send — allow hooks to modify outbound.
+	// Step 11: Hook before-send.
 	outbound := buildOutbound(env.Message, resp)
 	if p.cfg.HookPipeline != nil {
 		hctx := &hook.Context{
 			Position: hook.BeforeSend,
 			Inbound:  env.Message,
-			Session:  &sessionViewAdapter{s: session},
 			Outbound: &outbound,
 			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
 			Metadata: hookMeta,
 			Logger:   logger,
 		}
-		_, _ = p.cfg.HookPipeline.RunBeforeSend(ctx, hctx)
+		if _, err := p.cfg.HookPipeline.RunBeforeSend(ctx, hctx); err != nil {
+			logger.Warn("pipeline: hook before_send error", "error", err)
+		}
 	}
 
 	// Step 12: Send — deliver response via ResponseSender.
@@ -191,14 +182,20 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	session.History = append(session.History, assistantMsg)
 	p.cfg.Store.Touch(env.Key)
 
-	// Step 14: Hook after-send — fire-and-forget (audit, analytics, etc.).
+	// m-60: Trim history after appending assistant message. After Step 13,
+	// history may exceed MaxHistoryLen by 1. Trim it here to maintain the invariant.
+	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
+		session.History = session.History[len(session.History)-limit:]
+	}
+
+	// Step 14: Hook after-send (fire-and-forget).
 	if p.cfg.HookPipeline != nil {
 		hctx := &hook.Context{
 			Position: hook.AfterSend,
 			Inbound:  env.Message,
-			Session:  &sessionViewAdapter{s: session},
 			Outbound: &outbound,
 			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
 			Metadata: hookMeta,
 			Logger:   logger,
 		}
@@ -213,33 +210,6 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	return PipelineResult{Session: session, Response: &resp}
-}
-
-// buildSystemParts assembles the system prompt parts from SOUL.md and active skills.
-func (p *Pipeline) buildSystemParts(msg message.InboundMessage) []string {
-	var parts []string
-
-	// Load SOUL.md content (personality prompt).
-	soulContent := workspace.DefaultSoulPrompt
-	if p.cfg.SoulProvider != nil {
-		if content, err := p.cfg.SoulProvider.Load(); err == nil && content != "" {
-			soulContent = content
-		}
-	}
-	parts = append(parts, soulContent)
-
-	// Activate and format skills.
-	if p.cfg.SkillActivator != nil && len(p.cfg.Skills) > 0 {
-		active := p.cfg.SkillActivator.Activate(workspace.ActivateRequest{
-			Skills:      p.cfg.Skills,
-			UserMessage: msg.TextContent(),
-		})
-		if formatted := workspace.FormatSkillsForPrompt(active); formatted != "" {
-			parts = append(parts, formatted)
-		}
-	}
-
-	return parts
 }
 
 // sendError sends a user-friendly error message via ResponseSender. Never panics.

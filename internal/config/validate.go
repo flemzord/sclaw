@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flemzord/sclaw/internal/core"
 )
@@ -44,7 +45,6 @@ func Validate(cfg *Config) error {
 
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)
-
 
 	// Agent validation (skip entirely if no agents defined — backward compatible).
 	if len(cfg.Agents) > 0 {
@@ -104,7 +104,15 @@ func validateAgents(cfg *Config) []error {
 	var errs []error
 	var defaultAgent string
 
-	for name, node := range cfg.Agents {
+	// Sort agent names for deterministic error output when iterating.
+	names := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	for _, name := range names {
+		node := cfg.Agents[name]
 		var av agentValidation
 		if err := node.Decode(&av); err != nil {
 			errs = append(errs, fmt.Errorf("config: agent %q: failed to decode: %w", name, err))

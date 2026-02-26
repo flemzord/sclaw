@@ -110,10 +110,10 @@ func TestGateway_Provision(t *testing.T) {
 		t.Error("dispatcher should be initialized")
 	}
 
-	if _, ok := appCtx.Service("gateway.metrics"); !ok {
+	if _, ok := appCtx.GetService("gateway.metrics"); !ok {
 		t.Error("gateway.metrics not registered")
 	}
-	if _, ok := appCtx.Service("gateway.webhook_dispatcher"); !ok {
+	if _, ok := appCtx.GetService("gateway.webhook_dispatcher"); !ok {
 		t.Error("gateway.webhook_dispatcher not registered")
 	}
 }

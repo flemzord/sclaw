@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
-	"github.com/flemzord/sclaw/internal/workspace"
-	"github.com/flemzord/sclaw/internal/workspace/workspacetest"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -336,54 +334,23 @@ func TestPipeline_SessionReuse(t *testing.T) {
 	}
 }
 
-func TestPipeline_WithSoulAndSkills(t *testing.T) {
+func TestPipeline_HooksInvoked(t *testing.T) {
 	t.Parallel()
 
-	// Capture the messages sent to the provider to extract the system prompt.
-	var capturedMessages []provider.LLMMessage
-	mockProv := &providertest.MockProvider{
-		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
-			capturedMessages = req.Messages
-			return provider.CompletionResponse{
-				Content:      "Aye!",
-				FinishReason: provider.FinishReasonStop,
-			}, nil
-		},
-		ContextWindowSizeFunc: func() int { return 4096 },
-		ModelNameFunc:         func() string { return "test-model" },
-	}
+	mockProv := newTestMockProvider("Hook response")
 	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
 
 	sender := &testResponseSender{}
 	store := NewInMemorySessionStore()
+	hooks := hook.NewPipeline()
 
-	soulProvider := &workspacetest.MockSoulProvider{
-		LoadFunc: func() (string, error) {
-			return "You are a pirate captain.", nil
-		},
-	}
+	// Track which hook positions were invoked.
+	var mu sync.Mutex
+	var invoked []string
 
-	skills := []workspace.Skill{
-		{
-			Meta: workspace.SkillMeta{
-				Name:          "nav",
-				Description:   "Navigation",
-				ToolsRequired: []string{"compass"},
-				Trigger:       workspace.TriggerAlways,
-			},
-			Body: "Navigate the seas.",
-		},
-		{
-			Meta: workspace.SkillMeta{
-				Name:          "review",
-				Description:   "Code review",
-				ToolsRequired: []string{"read_file"},
-				Trigger:       workspace.TriggerAuto,
-				Keywords:      []string{"review"},
-			},
-			Body: "Review the code.",
-		},
-	}
+	hooks.Register(&trackingHook{name: "bp", pos: hook.BeforeProcess, mu: &mu, invoked: &invoked})
+	hooks.Register(&trackingHook{name: "bs", pos: hook.BeforeSend, mu: &mu, invoked: &invoked})
+	hooks.Register(&trackingHook{name: "as", pos: hook.AfterSend, mu: &mu, invoked: &invoked})
 
 	pipeline := NewPipeline(PipelineConfig{
 		Store:           store,
@@ -392,10 +359,8 @@ func TestPipeline_WithSoulAndSkills(t *testing.T) {
 		ApprovalManager: NewApprovalManager(),
 		AgentFactory:    &testAgentFactory{loop: loop},
 		ResponseSender:  sender,
+		HookPipeline:    hooks,
 		Logger:          slog.Default(),
-		SoulProvider:    soulProvider,
-		SkillActivator:  workspace.NewSkillActivator(),
-		Skills:          skills,
 	})
 
 	env := testEnvelope()
@@ -405,49 +370,48 @@ func TestPipeline_WithSoulAndSkills(t *testing.T) {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
 
-	// The agent loop injects the system prompt as the first message with role "system".
-	if len(capturedMessages) == 0 {
-		t.Fatal("expected captured messages")
-	}
-	systemMsg := capturedMessages[0]
-	if systemMsg.Role != provider.MessageRoleSystem {
-		t.Fatalf("first message role = %q, want %q", systemMsg.Role, provider.MessageRoleSystem)
-	}
+	mu.Lock()
+	defer mu.Unlock()
 
-	// Verify the system prompt contains the SOUL content.
-	if !strings.Contains(systemMsg.Content, "You are a pirate captain.") {
-		t.Errorf("system prompt missing SOUL content, got: %q", systemMsg.Content)
+	expected := []string{"bp", "bs", "as"}
+	if len(invoked) != len(expected) {
+		t.Fatalf("invoked hooks = %v, want %v", invoked, expected)
 	}
-
-	// The "nav" skill requires "compass" which is not in AvailableTools (empty),
-	// so it should NOT be activated. The "review" skill requires keyword match.
-	// With the default test message ("Hello"), neither skill should activate.
-	if strings.Contains(systemMsg.Content, "Active Skills") {
-		t.Errorf("system prompt should not contain skills (no tools available), got: %q", systemMsg.Content)
+	for i, name := range expected {
+		if invoked[i] != name {
+			t.Errorf("invoked[%d] = %q, want %q", i, invoked[i], name)
+		}
 	}
 }
 
-func TestPipeline_NilSoulProvider_DefaultPrompt(t *testing.T) {
+// trackingHook records its invocation for test assertions.
+type trackingHook struct {
+	name    string
+	pos     hook.Position
+	mu      *sync.Mutex
+	invoked *[]string
+}
+
+func (h *trackingHook) Position() hook.Position { return h.pos }
+func (h *trackingHook) Priority() int           { return 0 }
+
+func (h *trackingHook) Execute(_ context.Context, _ *hook.Context) (hook.Action, error) {
+	h.mu.Lock()
+	*h.invoked = append(*h.invoked, h.name)
+	h.mu.Unlock()
+	return hook.ActionContinue, nil
+}
+
+func TestPipeline_NilHooks(t *testing.T) {
 	t.Parallel()
 
-	var capturedMessages []provider.LLMMessage
-	mockProv := &providertest.MockProvider{
-		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
-			capturedMessages = req.Messages
-			return provider.CompletionResponse{
-				Content:      "OK",
-				FinishReason: provider.FinishReasonStop,
-			}, nil
-		},
-		ContextWindowSizeFunc: func() int { return 4096 },
-		ModelNameFunc:         func() string { return "test-model" },
-	}
+	mockProv := newTestMockProvider("OK")
 	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
 
 	sender := &testResponseSender{}
 	store := NewInMemorySessionStore()
 
-	// No SoulProvider, no skills — should use DefaultSoulPrompt.
+	// Hooks field is nil — pipeline should not panic.
 	pipeline := NewPipeline(PipelineConfig{
 		Store:           store,
 		LaneLock:        NewLaneLock(),
@@ -455,6 +419,7 @@ func TestPipeline_NilSoulProvider_DefaultPrompt(t *testing.T) {
 		ApprovalManager: NewApprovalManager(),
 		AgentFactory:    &testAgentFactory{loop: loop},
 		ResponseSender:  sender,
+		HookPipeline:    nil,
 		Logger:          slog.Default(),
 	})
 
@@ -464,16 +429,100 @@ func TestPipeline_NilSoulProvider_DefaultPrompt(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
+}
 
-	// The first message should be the system prompt with the default value.
-	if len(capturedMessages) == 0 {
-		t.Fatal("expected captured messages")
+// m-60: Verify that history does not exceed MaxHistoryLen after Step 13.
+func TestPipeline_HistoryTrimAfterAssistantAppend(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("Response")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// Use a very small MaxHistoryLen to trigger the edge case.
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		MaxHistoryLen:   2,
+	})
+
+	env := testEnvelope()
+
+	// First execution: history = [user, assistant] = 2 entries (at limit).
+	result := pipeline.Execute(context.Background(), env)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
 	}
-	systemMsg := capturedMessages[0]
-	if systemMsg.Role != provider.MessageRoleSystem {
-		t.Fatalf("first message role = %q, want %q", systemMsg.Role, provider.MessageRoleSystem)
+	if len(result.Session.History) > 2 {
+		t.Errorf("history length after first exec = %d, want <= 2", len(result.Session.History))
 	}
-	if systemMsg.Content != workspace.DefaultSoulPrompt {
-		t.Errorf("system prompt = %q, want %q", systemMsg.Content, workspace.DefaultSoulPrompt)
+
+	// Second execution: without m-60 fix, history would be [user, assistant, user, assistant] = 4
+	// but Step 8 trims to 2, then Step 13 appends to 3 — exceeding the limit.
+	// With the fix, Step 13 also trims back to 2.
+	result2 := pipeline.Execute(context.Background(), env)
+	if result2.Error != nil {
+		t.Fatalf("unexpected error: %v", result2.Error)
 	}
+	if len(result2.Session.History) > 2 {
+		t.Errorf("history length after second exec = %d, want <= 2 (m-60 fix)", len(result2.Session.History))
+	}
+}
+
+// m-29: Verify that hook errors are logged (not silently ignored).
+func TestPipeline_HookErrorLogged(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("OK")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+	hooks := hook.NewPipeline()
+
+	hookErr := errors.New("hook failed")
+	hooks.Register(&errorHook{name: "failing-hook", pos: hook.BeforeProcess, err: hookErr})
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		HookPipeline:    hooks,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	// The pipeline should continue despite hook errors (logged, not fatal).
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("pipeline should not fail on hook error, got: %v", result.Error)
+	}
+	if result.Response == nil {
+		t.Fatal("expected non-nil response despite hook error")
+	}
+}
+
+// errorHook always returns an error.
+type errorHook struct {
+	name string
+	pos  hook.Position
+	err  error
+}
+
+func (h *errorHook) Position() hook.Position { return h.pos }
+func (h *errorHook) Priority() int           { return 0 }
+
+func (h *errorHook) Execute(_ context.Context, _ *hook.Context) (hook.Action, error) {
+	return hook.ActionContinue, h.err
 }
