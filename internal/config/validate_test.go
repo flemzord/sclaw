@@ -162,22 +162,6 @@ func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
 	}
 }
 
-// ensureConfigurableModules adds entries for all registered Configurable modules
-// to cfg.Modules so that the strict check in Validate doesn't fail due to
-// modules registered by earlier tests in the same process.
-func ensureConfigurableModules(t *testing.T, cfg *Config) {
-	t.Helper()
-	for _, info := range core.GetModules() {
-		mod := info.New()
-		if _, ok := mod.(core.Configurable); ok {
-			id := string(info.ID)
-			if _, exists := cfg.Modules[id]; !exists {
-				cfg.Modules[id] = yaml.Node{}
-			}
-		}
-	}
-}
-
 // yamlNode builds a yaml.Node from a raw YAML string for testing.
 func yamlNode(t *testing.T, raw string) yaml.Node {
 	t.Helper()
@@ -200,7 +184,7 @@ func TestValidate_AgentsEmpty(t *testing.T) {
 		Modules: map[string]yaml.Node{id: {}},
 		Agents:  nil,
 	}
-	ensureConfigurableModules(t, cfg)
+
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -223,7 +207,7 @@ routing:
 `),
 		},
 	}
-	ensureConfigurableModules(t, cfg)
+
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error for duplicate default agents")
@@ -245,7 +229,7 @@ provider: provider.foo
 `),
 		},
 	}
-	ensureConfigurableModules(t, cfg)
+
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error for agent referencing unknown provider")
@@ -283,7 +267,7 @@ provider: `+providerID+`
 `),
 		},
 	}
-	ensureConfigurableModules(t, cfg)
+
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
