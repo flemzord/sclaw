@@ -14,6 +14,7 @@ import (
 	_ "github.com/flemzord/sclaw/internal/gateway"
 	_ "github.com/flemzord/sclaw/internal/node"
 	_ "github.com/flemzord/sclaw/modules/channel/telegram"
+	_ "github.com/flemzord/sclaw/modules/provider/openai_compatible"
 )
 
 // Set by goreleaser ldflags.
