@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"github.com/flemzord/sclaw/internal/channel"
@@ -33,9 +34,12 @@ func (t *Telegram) sendOutbound(ctx context.Context, msg message.OutboundMessage
 }
 
 // sendChunk dispatches a single chunk's blocks to the appropriate Telegram API methods.
+// Design: fail-fast — if any block send fails, remaining blocks are skipped and the
+// error is returned immediately. This prevents partial delivery from being silently
+// treated as success by the caller.
 func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage, chatID int64) error {
-	threadID := parseOptionalInt(chunk.ThreadID)
-	replyToID := parseOptionalInt(chunk.ReplyToID)
+	threadID := parseOptionalInt(chunk.ThreadID, t.logger)
+	replyToID := parseOptionalInt(chunk.ReplyToID, t.logger)
 	parseMode := resolveParseMode(chunk.Hints)
 	disablePreview := false
 	disableNotification := false
@@ -106,18 +110,18 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 			})
 
 		case message.BlockLocation:
-			lat := 0.0
-			lon := 0.0
-			if block.Lat != nil {
-				lat = *block.Lat
-			}
-			if block.Lon != nil {
-				lon = *block.Lon
+			if block.Lat == nil || block.Lon == nil {
+				t.logger.Warn("skipping location block with nil coordinates",
+					"chat_id", chatID,
+					"has_lat", block.Lat != nil,
+					"has_lon", block.Lon != nil,
+				)
+				continue
 			}
 			_, err = t.client.SendLocation(ctx, SendLocationRequest{
 				ChatID:              chatID,
-				Latitude:            lat,
-				Longitude:           lon,
+				Latitude:            *block.Lat,
+				Longitude:           *block.Lon,
 				MessageThreadID:     threadID,
 				ReplyToMessageID:    replyToID,
 				DisableNotification: disableNotification,
@@ -147,10 +151,18 @@ func resolveParseMode(hints *message.OutboundHints) string {
 }
 
 // parseOptionalInt converts a string to int, returning 0 for empty strings.
-func parseOptionalInt(s string) int {
+// Logs a warning if the string is non-empty but not a valid integer.
+func parseOptionalInt(s string, logger *slog.Logger) int {
 	if s == "" {
 		return 0
 	}
-	v, _ := strconv.Atoi(s)
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		logger.Warn("parseOptionalInt: invalid integer value",
+			"value", s,
+			"error", err,
+		)
+		return 0
+	}
 	return v
 }

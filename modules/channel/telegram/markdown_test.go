@@ -116,6 +116,46 @@ func TestFormatMarkdownV2(t *testing.T) {
 			input: "**cafe** is nice",
 			want:  "*cafe* is nice",
 		},
+		{
+			name:  "italic text",
+			input: "This is _italic_ text",
+			want:  "This is _italic_ text",
+		},
+		{
+			name:  "italic with special chars inside",
+			input: "Check _item.one_ now",
+			want:  `Check _item\.one_ now`,
+		},
+		{
+			name:  "strikethrough text",
+			input: "This is ~~deleted~~ text",
+			want:  "This is ~deleted~ text",
+		},
+		{
+			name:  "strikethrough with special chars",
+			input: "~~old.value~~",
+			want:  `~old\.value~`,
+		},
+		{
+			name:  "link",
+			input: "[click here](https://example.com)",
+			want:  `[click here](https://example.com)`,
+		},
+		{
+			name:  "link with special chars in text",
+			input: "[item #1](https://example.com/path)",
+			want:  `[item \#1](https://example.com/path)`,
+		},
+		{
+			name:  "blockquote",
+			input: "> This is a quote!",
+			want:  `>This is a quote\!`,
+		},
+		{
+			name:  "mixed bold italic strikethrough",
+			input: "**bold** and _italic_ and ~~strike~~",
+			want:  `*bold* and _italic_ and ~strike~`,
+		},
 	}
 
 	for _, tt := range tests {
