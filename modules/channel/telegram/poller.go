@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -23,13 +24,16 @@ type Poller struct {
 	botUsername string
 	channelName string
 	config      Config
-	stopCh      chan struct{}
-	done        chan struct{}
-	stopOnce    sync.Once
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	once   sync.Once
 }
 
 // NewPoller creates a new Poller.
 func NewPoller(client *Client, inbox func(message.InboundMessage) error, allowList *channel.AllowList, logger *slog.Logger, botUsername, channelName string, config Config) *Poller {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Poller{
 		client:      client,
 		inbox:       inbox,
@@ -38,7 +42,8 @@ func NewPoller(client *Client, inbox func(message.InboundMessage) error, allowLi
 		botUsername: botUsername,
 		channelName: channelName,
 		config:      config,
-		stopCh:      make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
 		done:        make(chan struct{}),
 	}
 }
@@ -49,10 +54,17 @@ func (p *Poller) Start() {
 }
 
 // Stop signals the polling loop to stop and waits for it to finish.
+// It respects the provided context deadline — if ctx expires before the
+// loop exits, Stop returns ctx.Err().
 // It is safe to call Stop multiple times.
-func (p *Poller) Stop() {
-	p.stopOnce.Do(func() { close(p.stopCh) })
-	<-p.done
+func (p *Poller) Stop(ctx context.Context) error {
+	p.once.Do(func() { p.cancel() })
+	select {
+	case <-p.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // loop runs the long-polling loop until Stop() is called.
@@ -63,34 +75,52 @@ func (p *Poller) loop() {
 	var consecutiveErrors int
 
 	for {
-		select {
-		case <-p.stopCh:
+		if p.ctx.Err() != nil {
 			return
-		default:
 		}
 
-		updates, err := p.client.GetUpdates(p.ctx(), GetUpdatesRequest{
+		// Use a per-request timeout for the long-polling call.
+		// PollingTimeout is the server-side wait; add 10s margin for network.
+		reqTimeout := time.Duration(p.config.PollingTimeout+10) * time.Second
+		reqCtx, reqCancel := context.WithTimeout(p.ctx, reqTimeout)
+
+		updates, err := p.client.GetUpdates(reqCtx, GetUpdatesRequest{
 			Offset:         offset,
 			Timeout:        p.config.PollingTimeout,
 			AllowedUpdates: p.config.AllowedUpdates,
 		})
+		reqCancel()
+
 		if err != nil {
+			// Don't log when the poller is being stopped.
+			if p.ctx.Err() != nil {
+				return
+			}
+
 			consecutiveErrors++
 			p.logger.Error("polling getUpdates failed",
 				"error", err,
 				"consecutive_errors", consecutiveErrors,
 			)
 
+			// Progressive backoff: 1s, 2s, 3s, 4s, then pause 30s at threshold.
 			if consecutiveErrors >= maxConsecutivePollingErrors {
 				p.logger.Warn("polling paused after consecutive errors",
 					"pause", errorPauseDuration,
 				)
 				select {
-				case <-p.stopCh:
+				case <-p.ctx.Done():
 					return
 				case <-time.After(errorPauseDuration):
 				}
 				consecutiveErrors = 0
+			} else {
+				backoff := time.Duration(consecutiveErrors) * time.Second
+				select {
+				case <-p.ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
 			}
 			continue
 		}
@@ -102,12 +132,6 @@ func (p *Poller) loop() {
 			p.handleUpdate(&update)
 		}
 	}
-}
-
-// ctx returns a context that is cancelled when the poller stops.
-// It creates a short-lived context for each poll cycle.
-func (p *Poller) ctx() contextWrapper {
-	return contextWrapper{stopCh: p.stopCh}
 }
 
 // handleUpdate processes a single update.
@@ -134,28 +158,3 @@ func (p *Poller) handleUpdate(update *Update) {
 		)
 	}
 }
-
-// contextWrapper adapts a stop channel to a context.Context for the HTTP client.
-type contextWrapper struct {
-	stopCh <-chan struct{}
-}
-
-func (c contextWrapper) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (c contextWrapper) Done() <-chan struct{}       { return c.stopCh }
-
-func (c contextWrapper) Err() error {
-	select {
-	case <-c.stopCh:
-		return errPollerStopped
-	default:
-		return nil
-	}
-}
-
-func (c contextWrapper) Value(any) any { return nil }
-
-var errPollerStopped = pollerStoppedError{}
-
-type pollerStoppedError struct{}
-
-func (pollerStoppedError) Error() string { return "poller stopped" }

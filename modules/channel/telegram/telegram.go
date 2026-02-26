@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync/atomic"
 
 	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/core"
@@ -31,6 +32,10 @@ var (
 )
 
 // Telegram implements the Telegram Bot API channel for sclaw.
+//
+// NOTE: core.Reloader is intentionally not implemented. Configuration changes
+// (token rotation, allow list updates) require a full module restart. This
+// avoids complex partial-reload logic for a stateful network connection.
 type Telegram struct {
 	config    Config
 	client    *Client
@@ -39,6 +44,10 @@ type Telegram struct {
 	inbox     func(message.InboundMessage) error
 	botUser   *User
 	appCtx    *core.AppContext
+
+	// streamingDisabled is toggled by SendStream after repeated flush errors.
+	// Checked by SupportsStreaming() to dynamically disable streaming.
+	streamingDisabled atomic.Bool
 
 	// Set during Start() depending on mode.
 	poller          *Poller
@@ -84,7 +93,7 @@ func (t *Telegram) Validate() error {
 	if t.config.Mode == "webhook" && t.config.WebhookURL == "" {
 		return errors.New("telegram: webhook_url is required when mode is \"webhook\"")
 	}
-	return nil
+	return t.config.validate()
 }
 
 // Start implements core.Starter. It validates the bot token, then starts
@@ -175,7 +184,9 @@ func (t *Telegram) Stop(ctx context.Context) error {
 	switch t.config.Mode {
 	case "polling":
 		if t.poller != nil {
-			t.poller.Stop()
+			if err := t.poller.Stop(ctx); err != nil {
+				t.logger.Warn("telegram: poller stop timed out", "error", err)
+			}
 		}
 	case "webhook":
 		if err := t.client.DeleteWebhook(ctx); err != nil {

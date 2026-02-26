@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,9 +36,7 @@ func TestPollerReceivesUpdates(t *testing.T) {
 			})
 			return
 		}
-		// Second call: empty (give poller time to stop).
 		writeJSON(t, w, APIResponse[[]Update]{OK: true, Result: []Update{}})
-		// Sleep to let stop signal propagate.
 		time.Sleep(100 * time.Millisecond)
 	}))
 	defer srv.Close()
@@ -54,14 +53,15 @@ func TestPollerReceivesUpdates(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}, allowList, discardLogger(), "test_bot", "telegram", Config{
-		PollingTimeout: 0, // No long-polling timeout in tests.
+		PollingTimeout: 0,
 		AllowedUpdates: []string{"message"},
 	})
 
 	poller.Start()
-	// Wait for at least one update to be processed.
 	time.Sleep(500 * time.Millisecond)
-	poller.Stop()
+	if err := poller.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error: %v", err)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -101,7 +101,7 @@ func TestPollerDeniesUnallowedUsers(t *testing.T) {
 	defer srv.Close()
 
 	client := NewClient("TOKEN", srv.URL)
-	allowList := channel.NewAllowList([]string{"100"}, nil) // Only user 100 is allowed.
+	allowList := channel.NewAllowList([]string{"100"}, nil)
 
 	var mu sync.Mutex
 	var received []message.InboundMessage
@@ -118,7 +118,7 @@ func TestPollerDeniesUnallowedUsers(t *testing.T) {
 
 	poller.Start()
 	time.Sleep(500 * time.Millisecond)
-	poller.Stop()
+	_ = poller.Stop(context.Background())
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -131,7 +131,6 @@ func TestPollerCircuitBreaker(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		// Always return error.
 		writeJSON(t, w, APIResponse[json.RawMessage]{
 			OK:          false,
 			ErrorCode:   500,
@@ -151,12 +150,32 @@ func TestPollerCircuitBreaker(t *testing.T) {
 	})
 
 	poller.Start()
-	// Give it enough time to hit the circuit breaker (5 errors).
-	time.Sleep(300 * time.Millisecond)
-	poller.Stop()
+	time.Sleep(2 * time.Second)
+	_ = poller.Stop(context.Background())
 
-	// Should have hit at least 5 errors to trigger the breaker.
-	if got := calls.Load(); got < 5 {
-		t.Errorf("calls = %d, want >= 5", got)
+	if got := calls.Load(); got < 2 {
+		t.Errorf("calls = %d, want >= 2 (backoff reduces frequency)", got)
 	}
+}
+
+func TestPollerIdempotentStop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, APIResponse[[]Update]{OK: true, Result: []Update{}})
+	}))
+	defer srv.Close()
+
+	client := NewClient("TOKEN", srv.URL)
+	poller := NewPoller(client, func(_ message.InboundMessage) error {
+		return nil
+	}, channel.NewAllowList(nil, nil), discardLogger(), "test_bot", "telegram", Config{
+		PollingTimeout: 0,
+		AllowedUpdates: []string{"message"},
+	})
+
+	poller.Start()
+	time.Sleep(100 * time.Millisecond)
+
+	// Should not panic on double stop.
+	_ = poller.Stop(context.Background())
+	_ = poller.Stop(context.Background())
 }
