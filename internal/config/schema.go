@@ -9,6 +9,10 @@ type Config struct {
 	// Version is the config format version. Currently only "1" is supported.
 	Version string `yaml:"version"`
 
+	// Agents maps agent names to their raw YAML configuration.
+	// Each agent may reference a provider module and declare routing rules.
+	Agents map[string]yaml.Node `yaml:"agents"`
+
 	// Modules maps module IDs to their raw YAML configuration.
 	// Keys must match registered module IDs (e.g. "channel.telegram").
 	Modules map[string]yaml.Node `yaml:"modules"`

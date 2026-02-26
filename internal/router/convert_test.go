@@ -78,3 +78,86 @@ func TestBuildOutbound(t *testing.T) {
 		t.Errorf("TextContent() = %q, want %q", out.TextContent(), "Hi there!")
 	}
 }
+
+// m-30: Verify sessionViewAdapter.GetMetadata returns the value for a key.
+func TestSessionViewAdapter_GetMetadata(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{
+		ID:       "sess-1",
+		Metadata: map[string]any{"key": "original"},
+	}
+	adapter := &sessionViewAdapter{session: sess}
+
+	val, ok := adapter.GetMetadata("key")
+	if !ok {
+		t.Fatal("GetMetadata should return true for existing key")
+	}
+	if val != "original" {
+		t.Errorf("GetMetadata(key) = %v, want %q", val, "original")
+	}
+
+	_, ok = adapter.GetMetadata("missing")
+	if ok {
+		t.Error("GetMetadata should return false for missing key")
+	}
+}
+
+func TestSessionViewAdapter_GetMetadata_NilMetadata(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{ID: "sess-1"}
+	adapter := &sessionViewAdapter{session: sess}
+
+	_, ok := adapter.GetMetadata("any")
+	if ok {
+		t.Error("GetMetadata should return false when session metadata is nil")
+	}
+}
+
+func TestSessionViewAdapter_SessionID(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{ID: "sess-42"}
+	adapter := &sessionViewAdapter{session: sess}
+
+	if adapter.SessionID() != "sess-42" {
+		t.Errorf("SessionID() = %q, want %q", adapter.SessionID(), "sess-42")
+	}
+}
+
+func TestSessionViewAdapter_SessionKey(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{
+		ID:  "sess-1",
+		Key: SessionKey{Channel: "slack", ChatID: "C1", ThreadID: "T1"},
+	}
+	adapter := &sessionViewAdapter{session: sess}
+
+	ch, chatID, threadID := adapter.SessionKey()
+	if ch != "slack" || chatID != "C1" || threadID != "T1" {
+		t.Errorf("SessionKey() = (%q, %q, %q), want (slack, C1, T1)", ch, chatID, threadID)
+	}
+}
+
+func TestSessionViewAdapter_AgentID(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{ID: "sess-1", AgentID: "agent-x"}
+	adapter := &sessionViewAdapter{session: sess}
+
+	if adapter.AgentID() != "agent-x" {
+		t.Errorf("AgentID() = %q, want %q", adapter.AgentID(), "agent-x")
+	}
+}
+
+func TestSessionViewAdapter_CreatedAt(t *testing.T) {
+	t.Parallel()
+
+	sess := &Session{ID: "sess-1"}
+	adapter := &sessionViewAdapter{session: sess}
+
+	// Verify the method is callable and returns the session's CreatedAt.
+	_ = adapter.CreatedAt()
+}

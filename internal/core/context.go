@@ -22,6 +22,7 @@ type AppContext struct {
 
 	parentLogger  *slog.Logger
 	moduleConfigs map[string]yaml.Node
+	services      map[string]interface{}
 }
 
 // NewAppContext creates a new AppContext with the given base logger and directories.
@@ -54,7 +55,33 @@ func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
 		Workspace:     ctx.Workspace,
 		parentLogger:  ctx.parentLogger,
 		moduleConfigs: ctx.moduleConfigs,
+		services:      ctx.services,
 	}
+}
+
+// RegisterService registers a named service in the context.
+// If a service with the same name already exists, it logs a warning
+// and overwrites the previous registration (m-52).
+func (ctx *AppContext) RegisterService(name string, svc interface{}) {
+	if ctx.services == nil {
+		ctx.services = make(map[string]interface{})
+	}
+	if _, exists := ctx.services[name]; exists {
+		ctx.Logger.Warn("duplicate service registration, overwriting",
+			"service", name,
+		)
+	}
+	ctx.services[name] = svc
+}
+
+// GetService retrieves a registered service by name.
+// Returns nil and false if the service is not found.
+func (ctx *AppContext) GetService(name string) (interface{}, bool) {
+	if ctx.services == nil {
+		return nil, false
+	}
+	svc, ok := ctx.services[name]
+	return svc, ok
 }
 
 // LoadModule instantiates and provisions a module by its ID.

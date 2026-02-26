@@ -108,6 +108,20 @@ func (s *InMemorySessionStore) Len() int {
 	return len(s.sessions)
 }
 
+// Range calls fn for each session. If fn returns false, iteration stops.
+// The callback receives a snapshot-safe view (the lock is held for the
+// entire iteration — keep fn fast).
+func (s *InMemorySessionStore) Range(fn func(SessionKey, *Session) bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for key, sess := range s.sessions {
+		if !fn(key, sess) {
+			return
+		}
+	}
+}
+
 // ActiveKeys returns a snapshot of currently active session keys.
 func (s *InMemorySessionStore) ActiveKeys() map[SessionKey]struct{} {
 	s.mu.RLock()

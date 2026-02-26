@@ -125,6 +125,55 @@ func TestLaneLock_Cleanup(t *testing.T) {
 	}
 }
 
+func TestLaneLock_TryAcquire_Success(t *testing.T) {
+	t.Parallel()
+
+	ll := NewLaneLock()
+	key := SessionKey{Channel: "slack", ChatID: "C1", ThreadID: "T1"}
+
+	// TryAcquire on a free lane should succeed.
+	got := ll.TryAcquire(key)
+	if !got {
+		t.Fatal("TryAcquire on free lane should return true")
+	}
+
+	// Release should not panic.
+	ll.Release(key)
+
+	// Acquire again to verify the lane is reusable after release.
+	got = ll.TryAcquire(key)
+	if !got {
+		t.Fatal("TryAcquire after release should return true")
+	}
+	ll.Release(key)
+}
+
+func TestLaneLock_TryAcquire_Contention(t *testing.T) {
+	t.Parallel()
+
+	ll := NewLaneLock()
+	key := SessionKey{Channel: "slack", ChatID: "C1", ThreadID: "T1"}
+
+	// Hold the lane with a blocking Acquire.
+	ll.Acquire(key)
+
+	// TryAcquire on the same key should fail while held.
+	got := ll.TryAcquire(key)
+	if got {
+		t.Fatal("TryAcquire should return false when lane is already held")
+	}
+
+	// Release the blocking acquire.
+	ll.Release(key)
+
+	// Now TryAcquire should succeed again.
+	got = ll.TryAcquire(key)
+	if !got {
+		t.Fatal("TryAcquire should succeed after the lane is released")
+	}
+	ll.Release(key)
+}
+
 func TestLaneLock_AcquireRelease_NoDeadlock(t *testing.T) {
 	t.Parallel()
 

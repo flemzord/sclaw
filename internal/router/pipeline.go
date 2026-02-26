@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/pkg/message"
 )
@@ -23,6 +24,7 @@ type PipelineConfig struct {
 	AgentFactory    AgentFactory
 	ResponseSender  ResponseSender
 	Pruner          *lazyPruner
+	HookPipeline    *hook.Pipeline
 	Logger          *slog.Logger
 
 	// MaxHistoryLen caps the number of LLM messages kept in a session's
@@ -90,17 +92,36 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Skipped: true}
 	}
 
-	// Step 5: Hook before-process — placeholder, no-op.
-	// Will be implemented when the hook system is added.
-
-	// Step 6: Lane lock acquire (step 15 releases via defer).
+	// Step 5: Lane lock acquire (step 15 releases via defer).
+	// C-13 fix: Lane lock is acquired BEFORE hook before_process so that
+	// the session pointer is protected by the lane lock when hooks access it.
 	p.cfg.LaneLock.Acquire(env.Key)
 	defer p.cfg.LaneLock.Release(env.Key) // Step 15
+
+	// Step 6: Hook before-process — run after lane lock acquisition (C-13 fix).
+	hookMeta := make(map[string]any)
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.BeforeProcess,
+			Inbound:  env.Message,
+			Session:  &sessionViewAdapter{session: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		// m-29: Log the error if non-nil instead of ignoring it.
+		action, err := p.cfg.HookPipeline.RunBeforeProcess(ctx, hctx)
+		if err != nil {
+			logger.Warn("pipeline: hook before_process error", "error", err)
+		}
+		if action == hook.ActionDrop {
+			return PipelineResult{Session: session, Skipped: true}
+		}
+	}
 
 	// Step 7: Agent resolution — get or create agent loop for this session.
 	// Called after lane lock acquisition to avoid a data race on the live
 	// session pointer (R1 fix).
-	loop, err := p.cfg.AgentFactory.ForSession(session)
+	loop, err := p.cfg.AgentFactory.ForSession(session, env.Message)
 	if err != nil {
 		p.sendError(ctx, env.Message, "Failed to initialize agent.")
 		return PipelineResult{Session: session, Error: err}
@@ -130,10 +151,24 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Error: err}
 	}
 
-	// Step 11: Hook before-send — placeholder, no-op.
+	// Step 11: Hook before-send.
+	outbound := buildOutbound(env.Message, resp)
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.BeforeSend,
+			Inbound:  env.Message,
+			Outbound: &outbound,
+			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		if _, err := p.cfg.HookPipeline.RunBeforeSend(ctx, hctx); err != nil {
+			logger.Warn("pipeline: hook before_send error", "error", err)
+		}
+	}
 
 	// Step 12: Send — deliver response via ResponseSender.
-	outbound := buildOutbound(env.Message, resp)
 	if err := p.cfg.ResponseSender.Send(ctx, outbound); err != nil {
 		logger.Error("pipeline: failed to send response", "error", err, "session_id", session.ID)
 		return PipelineResult{Session: session, Response: &resp, Error: err}
@@ -147,7 +182,25 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	session.History = append(session.History, assistantMsg)
 	p.cfg.Store.Touch(env.Key)
 
-	// Step 14: Hook after-send — placeholder, no-op.
+	// m-60: Trim history after appending assistant message. After Step 13,
+	// history may exceed MaxHistoryLen by 1. Trim it here to maintain the invariant.
+	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
+		session.History = session.History[len(session.History)-limit:]
+	}
+
+	// Step 14: Hook after-send (fire-and-forget).
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.AfterSend,
+			Inbound:  env.Message,
+			Outbound: &outbound,
+			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		p.cfg.HookPipeline.RunAfterSend(ctx, hctx)
+	}
 
 	// Lazy pruning — opportunistically prune stale sessions.
 	if p.cfg.Pruner != nil {

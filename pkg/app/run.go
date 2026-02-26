@@ -13,6 +13,7 @@ import (
 	"github.com/flemzord/sclaw/internal/bootstrap"
 	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
+	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/reload"
 )
 
@@ -79,6 +80,21 @@ func Run(params RunParams) error {
 
 	appCtx := core.NewAppContext(logger, dataDir, workspace)
 	appCtx = appCtx.WithModuleConfigs(cfg.Modules)
+
+	// Parse and register multi-agent configuration if present.
+	if len(cfg.Agents) > 0 {
+		agents, order, err := multiagent.ParseAgents(cfg.Agents)
+		if err != nil {
+			return err
+		}
+		registry, err := multiagent.NewRegistry(agents, order)
+		if err != nil {
+			return err
+		}
+		appCtx.RegisterService("multiagent.registry", registry)
+		appCtx.RegisterService("multiagent.agents", agents)
+		logger.Info("multi-agent mode enabled", "agents", len(agents))
+	}
 
 	application := core.NewApp(appCtx)
 	ids := config.Resolve(cfg)

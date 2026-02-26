@@ -404,6 +404,33 @@ func IsRateLimit(err error) bool {
 	return errors.Is(err, ErrRateLimit)
 }
 
+// Status is a point-in-time snapshot of a provider's health.
+type Status struct {
+	Name           string        `json:"name"`
+	Role           Role          `json:"role"`
+	State          string        `json:"state"` // "healthy", "cooldown", "dead"
+	Failures       int           `json:"failures"`
+	CurrentBackoff time.Duration `json:"current_backoff"`
+	Available      bool          `json:"available"`
+}
+
+// HealthReport returns a point-in-time health snapshot for every provider in the chain.
+func (pc *Chain) HealthReport() []Status {
+	report := make([]Status, len(pc.entries))
+	for i := range pc.entries {
+		e := &pc.entries[i]
+		report[i] = Status{
+			Name:           e.Name,
+			Role:           e.Role,
+			State:          e.health.State().String(),
+			Failures:       e.health.Failures(),
+			CurrentBackoff: e.health.CurrentBackoff(),
+			Available:      e.health.IsAvailable(),
+		}
+	}
+	return report
+}
+
 // runHealthChecks runs periodic health probes for all entries.
 // It blocks until the context is cancelled.
 func runHealthChecks(ctx context.Context, interval time.Duration, entries []chainEntry) {

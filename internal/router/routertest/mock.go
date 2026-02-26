@@ -51,13 +51,13 @@ func (m *MockResponseSender) SendCallCount() int {
 
 // MockAgentFactory returns agent loops for test sessions.
 type MockAgentFactory struct {
-	ForSessionFunc func(session *router.Session) (*agent.Loop, error)
+	ForSessionFunc func(session *router.Session, msg message.InboundMessage) (*agent.Loop, error)
 }
 
 // ForSession delegates to ForSessionFunc if set, otherwise returns nil.
-func (m *MockAgentFactory) ForSession(session *router.Session) (*agent.Loop, error) {
+func (m *MockAgentFactory) ForSession(session *router.Session, msg message.InboundMessage) (*agent.Loop, error) {
 	if m.ForSessionFunc != nil {
-		return m.ForSessionFunc(session)
+		return m.ForSessionFunc(session, msg)
 	}
 	return nil, nil
 }
@@ -70,6 +70,7 @@ type MockSessionStore struct {
 	DeleteFunc      func(key router.SessionKey)
 	PruneFunc       func(maxIdle time.Duration) int
 	LenFunc         func() int
+	RangeFunc       func(fn func(router.SessionKey, *router.Session) bool)
 }
 
 // GetOrCreate delegates to GetOrCreateFunc if set, otherwise returns a default session.
@@ -116,6 +117,13 @@ func (m *MockSessionStore) Len() int {
 		return m.LenFunc()
 	}
 	return 0
+}
+
+// Range delegates to RangeFunc if set, otherwise is a no-op.
+func (m *MockSessionStore) Range(fn func(router.SessionKey, *router.Session) bool) {
+	if m.RangeFunc != nil {
+		m.RangeFunc(fn)
+	}
 }
 
 // Interface guards.

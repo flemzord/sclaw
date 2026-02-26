@@ -301,3 +301,69 @@ func TestAppContext_ForModule_PropagatesConfig(t *testing.T) {
 		t.Error("child context should have test.mod config")
 	}
 }
+
+func TestAppContext_RegisterService(t *testing.T) {
+	ctx := NewAppContext(nil, "/data", "/ws")
+
+	type myService struct{ Name string }
+	svc := &myService{Name: "test"}
+
+	ctx.RegisterService("my.service", svc)
+
+	got, ok := ctx.GetService("my.service")
+	if !ok {
+		t.Fatal("expected service to be found")
+	}
+	if got != svc {
+		t.Errorf("got %v, want %v", got, svc)
+	}
+}
+
+func TestAppContext_GetService_NotFound(t *testing.T) {
+	ctx := NewAppContext(nil, "/data", "/ws")
+
+	_, ok := ctx.GetService("does.not.exist")
+	if ok {
+		t.Error("expected service not found")
+	}
+}
+
+func TestAppContext_RegisterService_DuplicateOverwrites(t *testing.T) {
+	// m-52: duplicate registration should warn and overwrite.
+	ctx := NewAppContext(nil, "/data", "/ws")
+
+	ctx.RegisterService("dup", "first")
+	ctx.RegisterService("dup", "second")
+
+	got, ok := ctx.GetService("dup")
+	if !ok {
+		t.Fatal("expected service to be found")
+	}
+	if got != "second" {
+		t.Errorf("got %v, want second", got)
+	}
+}
+
+func TestAppContext_ForModule_PropagatesServices(t *testing.T) {
+	ctx := NewAppContext(nil, "/data", "/ws")
+	ctx.RegisterService("shared", "value")
+
+	child := ctx.ForModule("test.mod")
+
+	got, ok := child.GetService("shared")
+	if !ok {
+		t.Fatal("child context should have parent services")
+	}
+	if got != "value" {
+		t.Errorf("got %v, want value", got)
+	}
+}
+
+func TestAppContext_GetService_NilServicesMap(t *testing.T) {
+	// Should not panic when services map is nil.
+	ctx := NewAppContext(nil, "/data", "/ws")
+	_, ok := ctx.GetService("anything")
+	if ok {
+		t.Error("expected service not found on fresh context")
+	}
+}

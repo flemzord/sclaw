@@ -146,6 +146,9 @@ func TestValidate_ConfigurableModuleMissingConfig(t *testing.T) {
 }
 
 func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
+	// After removing the strict check (which required ALL registered
+	// Configurable modules to have config entries), a configurable module
+	// that is not listed in config is simply not loaded. No error expected.
 	cfgID := t.Name() + ".config"
 	stubID := t.Name() + ".other"
 	registerConfigurable(t, cfgID)
@@ -154,14 +157,134 @@ func TestValidate_ConfigurableModuleNoEntry(t *testing.T) {
 		Version: "1",
 		Modules: map[string]yaml.Node{stubID: {}},
 	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// ensureConfigurableModules adds entries for all registered Configurable modules
+// to cfg.Modules so that the strict check in Validate doesn't fail due to
+// modules registered by earlier tests in the same process.
+func ensureConfigurableModules(t *testing.T, cfg *Config) {
+	t.Helper()
+	for _, info := range core.GetModules() {
+		mod := info.New()
+		if _, ok := mod.(core.Configurable); ok {
+			id := string(info.ID)
+			if _, exists := cfg.Modules[id]; !exists {
+				cfg.Modules[id] = yaml.Node{}
+			}
+		}
+	}
+}
+
+// yamlNode builds a yaml.Node from a raw YAML string for testing.
+func yamlNode(t *testing.T, raw string) yaml.Node {
+	t.Helper()
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {
+		t.Fatalf("yamlNode: %v", err)
+	}
+	// yaml.Unmarshal wraps in a document node; return the first content node.
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		return *node.Content[0]
+	}
+	return node
+}
+
+func TestValidate_AgentsEmpty(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{id: {}},
+		Agents:  nil,
+	}
+	ensureConfigurableModules(t, cfg)
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_AgentsDuplicateDefault(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{id: {}},
+		Agents: map[string]yaml.Node{
+			"agent1": yamlNode(t, `
+routing:
+  default: true
+`),
+			"agent2": yamlNode(t, `
+routing:
+  default: true
+`),
+		},
+	}
+	ensureConfigurableModules(t, cfg)
 	err := Validate(cfg)
 	if err == nil {
-		t.Fatal("expected error for configurable module without config entry")
+		t.Fatal("expected error for duplicate default agents")
 	}
-	if !strings.Contains(err.Error(), cfgID) {
-		t.Errorf("error should mention %s: %v", cfgID, err)
+	if !strings.Contains(err.Error(), "multiple agents marked as default") {
+		t.Errorf("error should mention multiple agents marked as default: %v", err)
 	}
-	if !strings.Contains(err.Error(), "requires configuration") {
-		t.Errorf("error should mention requires configuration: %v", err)
+}
+
+func TestValidate_AgentsUnknownProvider(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{id: {}},
+		Agents: map[string]yaml.Node{
+			"support": yamlNode(t, `
+provider: provider.foo
+`),
+		},
+	}
+	ensureConfigurableModules(t, cfg)
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for agent referencing unknown provider")
+	}
+	if !strings.Contains(err.Error(), "support") {
+		t.Errorf("error should mention agent name: %v", err)
+	}
+	if !strings.Contains(err.Error(), "provider.foo") {
+		t.Errorf("error should mention provider module: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown provider module") {
+		t.Errorf("error should mention unknown provider module: %v", err)
+	}
+}
+
+func TestValidate_AgentsValid(t *testing.T) {
+	modID := t.Name() + ".mod"
+	providerID := t.Name() + ".provider"
+	registerStub(t, modID)
+	registerStub(t, providerID)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{
+			modID:      {},
+			providerID: {},
+		},
+		Agents: map[string]yaml.Node{
+			"main": yamlNode(t, `
+provider: `+providerID+`
+routing:
+  default: true
+`),
+			"fallback": yamlNode(t, `
+provider: `+providerID+`
+`),
+		},
+	}
+	ensureConfigurableModules(t, cfg)
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

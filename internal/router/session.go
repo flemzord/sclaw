@@ -60,4 +60,7 @@ type SessionStore interface {
 
 	// Len returns the number of active sessions.
 	Len() int
+
+	// Range calls fn for each session. If fn returns false, iteration stops.
+	Range(fn func(SessionKey, *Session) bool)
 }

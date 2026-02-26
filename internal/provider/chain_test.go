@@ -1218,3 +1218,78 @@ func TestProviderChain_StreamSuccessAfterFullConsumption(t *testing.T) {
 		t.Errorf("content = %q, want %q", resp.Content, "streamer")
 	}
 }
+
+func TestChain_HealthReport_AllHealthy(t *testing.T) {
+	t.Parallel()
+
+	chain, err := provider.NewChain([]provider.ChainEntry{
+		{Name: "p1", Provider: okProvider("p1"), Role: provider.RolePrimary},
+		{Name: "p2", Provider: okProvider("p2"), Role: provider.RoleInternal},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report := chain.HealthReport()
+	if len(report) != 2 {
+		t.Fatalf("report len = %d, want 2", len(report))
+	}
+
+	for i, s := range report {
+		if s.State != "healthy" {
+			t.Errorf("report[%d].State = %q, want %q", i, s.State, "healthy")
+		}
+		if !s.Available {
+			t.Errorf("report[%d].Available = false, want true", i)
+		}
+		if s.Failures != 0 {
+			t.Errorf("report[%d].Failures = %d, want 0", i, s.Failures)
+		}
+	}
+
+	if report[0].Name != "p1" || report[0].Role != provider.RolePrimary {
+		t.Errorf("report[0] = %+v, want name=p1 role=primary", report[0])
+	}
+	if report[1].Name != "p2" || report[1].Role != provider.RoleInternal {
+		t.Errorf("report[1] = %+v, want name=p2 role=internal", report[1])
+	}
+}
+
+func TestChain_HealthReport_WithFailures(t *testing.T) {
+	t.Parallel()
+
+	chain, err := provider.NewChain([]provider.ChainEntry{
+		{
+			Name:     "failing",
+			Provider: failProvider(provider.ErrProviderDown),
+			Role:     provider.RolePrimary,
+			Health:   provider.HealthConfig{MaxFailures: 3, InitialBackoff: time.Hour},
+		},
+		{Name: "ok", Provider: okProvider("ok"), Role: provider.RolePrimary},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Drive first provider into cooldown.
+	_, _ = chain.Complete(context.Background(), provider.RolePrimary, provider.CompletionRequest{})
+
+	report := chain.HealthReport()
+	if len(report) != 2 {
+		t.Fatalf("report len = %d, want 2", len(report))
+	}
+
+	if report[0].State != "cooldown" {
+		t.Errorf("report[0].State = %q, want %q", report[0].State, "cooldown")
+	}
+	if report[0].Available {
+		t.Error("failing provider should not be available in cooldown with long backoff")
+	}
+	if report[0].Failures != 1 {
+		t.Errorf("report[0].Failures = %d, want 1", report[0].Failures)
+	}
+
+	if report[1].State != "healthy" {
+		t.Errorf("report[1].State = %q, want %q", report[1].State, "healthy")
+	}
+}

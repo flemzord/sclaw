@@ -55,11 +55,11 @@ func (p *PendingApproval) Begin(
 		p.mu.Unlock()
 		return ApprovalResponse{}, ErrDenied
 	}
-	p.state = StatePending
-	if p.responseCh == nil {
-		p.responseCh = make(chan ApprovalResponse, 1)
-	}
+	// Create a fresh channel to avoid consuming responses from a
+	// concurrent Respond call that races with stale-drain (C-xx fix).
+	p.responseCh = make(chan ApprovalResponse, 1)
 	respCh := p.responseCh
+	p.state = StatePending
 	p.mu.Unlock()
 
 	defer func() {
@@ -70,12 +70,6 @@ func (p *PendingApproval) Begin(
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	// Drop any stale response from a previous flow.
-	select {
-	case <-respCh:
-	default:
-	}
 
 	requestErrCh := make(chan error, 1)
 	if requester != nil {

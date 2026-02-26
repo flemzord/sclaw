@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flemzord/sclaw/internal/core"
 )
@@ -12,7 +13,7 @@ import (
 // It verifies the version field, ensures modules are present,
 // and checks that all referenced module IDs exist in the registry.
 // It also enforces that Configurable modules have a config entry
-// and validates plugin and security settings.
+// and validates plugin, security, and agent settings.
 func Validate(cfg *Config) error {
 	var errs []error
 
@@ -45,6 +46,11 @@ func Validate(cfg *Config) error {
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)
 
+	// Agent validation (skip entirely if no agents defined — backward compatible).
+	if len(cfg.Agents) > 0 {
+		errs = append(errs, validateAgents(cfg)...)
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -76,6 +82,63 @@ func validateSecurity(sec *SecurityConfig) []error {
 		}
 		if len(raw) != 32 { // ed25519.PublicKeySize
 			errs = append(errs, fmt.Errorf("config: security.plugins.trusted_keys[%d]: invalid key size: got %d, want 32", i, len(raw)))
+		}
+	}
+
+	return errs
+}
+
+// agentValidation is a minimal struct used to decode agent YAML nodes
+// for validation purposes without importing the multiagent package.
+type agentValidation struct {
+	Provider string `yaml:"provider"`
+	Routing  struct {
+		Default bool `yaml:"default"`
+	} `yaml:"routing"`
+}
+
+// validateAgents checks agent-specific constraints:
+//   - At most one agent may be marked as default (routing.default: true).
+//   - If an agent references a provider, that provider must exist in cfg.Modules.
+func validateAgents(cfg *Config) []error {
+	var errs []error
+	var defaultAgent string
+
+	// Sort agent names for deterministic error output when iterating.
+	names := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	for _, name := range names {
+		node := cfg.Agents[name]
+		var av agentValidation
+		if err := node.Decode(&av); err != nil {
+			errs = append(errs, fmt.Errorf("config: agent %q: failed to decode: %w", name, err))
+			continue
+		}
+
+		// Check for duplicate default agents.
+		if av.Routing.Default {
+			if defaultAgent != "" {
+				errs = append(errs, fmt.Errorf(
+					"config: multiple agents marked as default: %q and %q",
+					defaultAgent, name,
+				))
+			} else {
+				defaultAgent = name
+			}
+		}
+
+		// Check that referenced provider exists in modules.
+		if av.Provider != "" {
+			if _, exists := cfg.Modules[av.Provider]; !exists {
+				errs = append(errs, fmt.Errorf(
+					"config: agent %q references unknown provider module %q",
+					name, av.Provider,
+				))
+			}
 		}
 	}
 
