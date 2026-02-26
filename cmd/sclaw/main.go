@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/flemzord/sclaw/internal/gateway"
 	_ "github.com/flemzord/sclaw/internal/node"
+	_ "github.com/flemzord/sclaw/modules/channel/telegram"
 )
 
 // Set by goreleaser ldflags.
