@@ -17,7 +17,7 @@ func TestAuthMiddleware_ValidBearerToken(t *testing.T) {
 	t.Parallel()
 
 	cfg := AuthConfig{BearerToken: "secret-token"}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
@@ -34,7 +34,7 @@ func TestAuthMiddleware_InvalidBearerToken(t *testing.T) {
 	t.Parallel()
 
 	cfg := AuthConfig{BearerToken: "secret-token"}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
@@ -51,7 +51,7 @@ func TestAuthMiddleware_ValidBasicAuth(t *testing.T) {
 	t.Parallel()
 
 	cfg := AuthConfig{BasicUser: "admin", BasicPass: "pass123"}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("admin", "pass123")
@@ -68,7 +68,7 @@ func TestAuthMiddleware_InvalidBasicAuth(t *testing.T) {
 	t.Parallel()
 
 	cfg := AuthConfig{BasicUser: "admin", BasicPass: "pass123"}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	req.SetBasicAuth("admin", "wrongpass")
@@ -85,7 +85,7 @@ func TestAuthMiddleware_NoAuthHeader(t *testing.T) {
 	t.Parallel()
 
 	cfg := AuthConfig{BearerToken: "token"}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	rr := httptest.NewRecorder()
@@ -105,7 +105,7 @@ func TestAuthMiddleware_BearerPreferredOverBasic(t *testing.T) {
 		BasicUser:   "admin",
 		BasicPass:   "pass",
 	}
-	handler := authMiddleware(cfg)(okHandler())
+	handler := authMiddleware(cfg, nil)(okHandler())
 
 	// Bearer should work
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)

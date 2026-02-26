@@ -70,6 +70,14 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 
 	// Step 2: Session resolution — get or create session.
 	session, created := p.cfg.Store.GetOrCreate(env.Key)
+	if session == nil {
+		logger.Warn("pipeline: max sessions reached, message dropped",
+			"channel", env.Key.Channel,
+			"chat_id", env.Key.ChatID,
+		)
+		p.sendError(ctx, env.Message, "Too many active sessions. Please try again later.")
+		return PipelineResult{Skipped: true}
+	}
 	if created {
 		logger.Info("pipeline: new session created", "session_id", session.ID)
 	}

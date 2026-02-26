@@ -15,6 +15,7 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/reload"
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 // RunParams configures the main application loop.
@@ -65,9 +66,34 @@ func Run(params RunParams) error {
 		return err
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// Initialize credential store and redactor (security foundation).
+	credStore := security.NewCredentialStore()
+	redactor := security.NewRedactor()
+
+	// Wrap the text handler in a redacting handler to prevent secret leakage in logs.
+	innerHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: params.LogLevel,
-	}))
+	})
+	logger := slog.New(security.NewRedactingHandler(innerHandler, redactor))
+
+	// Initialize audit logger.
+	auditLogger := security.NewAuditLogger(security.AuditLoggerConfig{
+		Redactor: redactor,
+	})
+
+	// Initialize rate limiter from config if present.
+	var rateLimiter *security.RateLimiter
+	if cfg.Security != nil {
+		rl := cfg.Security.RateLimits
+		rateLimiter = security.NewRateLimiter(security.RateLimitConfig{
+			MaxSessions:     rl.MaxSessions,
+			MessagesPerMin:  rl.MessagesPerMin,
+			ToolCallsPerMin: rl.ToolCallsPerMin,
+			TokensPerHour:   rl.TokensPerHour,
+		})
+	} else {
+		rateLimiter = security.NewRateLimiter(security.RateLimitConfig{})
+	}
 
 	dataDir := params.DataDir
 	if dataDir == "" {
@@ -80,6 +106,12 @@ func Run(params RunParams) error {
 
 	appCtx := core.NewAppContext(logger, dataDir, workspace)
 	appCtx = appCtx.WithModuleConfigs(cfg.Modules)
+
+	// Register security services for cross-module discovery.
+	appCtx.RegisterService("security.credentials", credStore)
+	appCtx.RegisterService("security.redactor", redactor)
+	appCtx.RegisterService("security.audit", auditLogger)
+	appCtx.RegisterService("security.ratelimiter", rateLimiter)
 
 	// Parse and register multi-agent configuration if present.
 	if len(cfg.Agents) > 0 {

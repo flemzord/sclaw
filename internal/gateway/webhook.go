@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/flemzord/sclaw/internal/security"
+
 	"github.com/go-chi/chi/v5"
 )
 
@@ -79,10 +81,22 @@ func (d *WebhookDispatcher) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body to 10 MiB to protect against oversized payloads.
+	const maxWebhookBodySize = 10 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodySize)
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
+	}
+
+	// Validate JSON depth to protect against JSON bombs.
+	if len(body) > 0 {
+		if err := security.ValidateJSONDepth(body, 0); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
 	}
 
 	d.mu.RLock()

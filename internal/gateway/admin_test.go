@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/flemzord/sclaw/internal/router"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -144,15 +145,16 @@ func TestAdmin_RedactSecrets(t *testing.T) {
 		},
 	}
 
-	redactSecrets(m)
+	r := security.NewRedactor()
+	r.RedactMap(m)
 
-	if m["api_key"] != "***REDACTED***" {
+	if m["api_key"] != security.RedactPlaceholder {
 		t.Errorf("api_key = %q, want redacted", m["api_key"])
 	}
-	if m["bearer_token"] != "***REDACTED***" {
+	if m["bearer_token"] != security.RedactPlaceholder {
 		t.Errorf("bearer_token = %q, want redacted", m["bearer_token"])
 	}
-	if m["password"] != "***REDACTED***" {
+	if m["password"] != security.RedactPlaceholder {
 		t.Errorf("password = %q, want redacted", m["password"])
 	}
 	if m["name"] != "test" {
@@ -160,7 +162,7 @@ func TestAdmin_RedactSecrets(t *testing.T) {
 	}
 
 	nested := m["nested"].(map[string]any)
-	if nested["secret"] != "***REDACTED***" {
+	if nested["secret"] != security.RedactPlaceholder {
 		t.Errorf("nested.secret = %q, want redacted", nested["secret"])
 	}
 	if nested["normal"] != "visible" {
@@ -169,7 +171,7 @@ func TestAdmin_RedactSecrets(t *testing.T) {
 
 	list := m["list"].([]any)
 	item := list[0].(map[string]any)
-	if item["token"] != "***REDACTED***" {
+	if item["token"] != security.RedactPlaceholder {
 		t.Errorf("list[0].token = %q, want redacted", item["token"])
 	}
 }
@@ -182,7 +184,8 @@ func TestAdmin_RedactSecrets_EmptyValue(t *testing.T) {
 		"secret":  "",
 	}
 
-	redactSecrets(m)
+	r := security.NewRedactor()
+	r.RedactMap(m)
 
 	// Empty string values should NOT be redacted (nothing to hide).
 	if m["api_key"] != "" {

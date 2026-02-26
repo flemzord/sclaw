@@ -77,11 +77,16 @@ func NewManager(cfg ManagerConfig) *Manager {
 // SpawnRequest is the input for spawning a sub-agent.
 type SpawnRequest struct {
 	ParentID       string
+	SessionID      string // ID of the calling session for cross-session validation
 	SystemPrompt   string
 	InitialMessage string
 	Timeout        time.Duration // 0 = use default
 	IsSubAgent     bool          // true = reject (no recursive spawn)
 }
+
+// ErrCrossSession is returned when a spawn request comes from a different
+// session than the parent agent, preventing cross-session data access.
+var ErrCrossSession = errors.New("subagent: cross-session spawn not allowed")
 
 // Spawn creates and starts a new sub-agent. Returns the sub-agent ID.
 func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (string, error) {
@@ -90,6 +95,20 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (string, error) {
 	}
 
 	m.mu.Lock()
+
+	// Cross-session validation: if a SessionID is provided on the request,
+	// verify that any existing sub-agent for this ParentID belongs to the
+	// same session. Performed under the same lock as insertion to prevent
+	// TOCTOU race conditions.
+	if req.SessionID != "" && req.ParentID != "" {
+		for _, sa := range m.agents {
+			if sa.ParentID == req.ParentID && sa.SessionID != "" && sa.SessionID != req.SessionID {
+				m.mu.Unlock()
+				return "", ErrCrossSession
+			}
+		}
+	}
+
 	if m.active >= m.cfg.MaxConcurrent {
 		m.mu.Unlock()
 		return "", ErrMaxConcurrent
@@ -111,6 +130,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (string, error) {
 	sa := &SubAgent{
 		ID:           id,
 		ParentID:     req.ParentID,
+		SessionID:    req.SessionID,
 		Status:       StatusRunning,
 		SystemPrompt: req.SystemPrompt,
 		History: []provider.LLMMessage{

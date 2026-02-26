@@ -11,6 +11,7 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
+	"github.com/flemzord/sclaw/internal/security"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,8 +32,10 @@ type Gateway struct {
 	startedAt  time.Time
 
 	// Resolved lazily at Start() via service registry.
-	sessions router.SessionStore
-	chain    *provider.Chain
+	sessions    router.SessionStore
+	chain       *provider.Chain
+	redactor    *security.Redactor
+	auditLogger *security.AuditLogger
 }
 
 // ModuleInfo implements core.Module.
@@ -99,6 +102,16 @@ func (g *Gateway) Start() error {
 	if svc, ok := g.appCtx.GetService("provider.chain"); ok {
 		if chain, ok := svc.(*provider.Chain); ok {
 			g.chain = chain
+		}
+	}
+	if svc, ok := g.appCtx.GetService("security.redactor"); ok {
+		if r, ok := svc.(*security.Redactor); ok {
+			g.redactor = r
+		}
+	}
+	if svc, ok := g.appCtx.GetService("security.audit"); ok {
+		if al, ok := svc.(*security.AuditLogger); ok {
+			g.auditLogger = al
 		}
 	}
 

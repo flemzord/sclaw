@@ -5,11 +5,11 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
-	"regexp"
 
 	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/router"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -133,9 +133,6 @@ func (g *Gateway) handleListAgents() http.HandlerFunc {
 	}
 }
 
-// secretPattern matches YAML keys that likely contain secrets.
-var secretPattern = regexp.MustCompile(`(?i)(secret|token|password|key|api_key)`)
-
 // handleGetConfig returns the current config with secrets redacted.
 func (g *Gateway) handleGetConfig() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -168,32 +165,15 @@ func (g *Gateway) handleGetConfig() http.HandlerFunc {
 			return
 		}
 
-		redactSecrets(generic)
+		// Delegate to centralized Redactor if available, fall back to local redaction.
+		if g.redactor != nil {
+			g.redactor.RedactMap(generic)
+		} else {
+			security.NewRedactor().RedactMap(generic)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(generic)
-	}
-}
-
-// redactSecrets walks a map and replaces values whose keys match the secret pattern.
-func redactSecrets(m map[string]any) {
-	for k, v := range m {
-		if secretPattern.MatchString(k) {
-			if s, ok := v.(string); ok && s != "" {
-				m[k] = "***REDACTED***"
-			}
-			continue
-		}
-		switch val := v.(type) {
-		case map[string]any:
-			redactSecrets(val)
-		case []any:
-			for _, item := range val {
-				if sub, ok := item.(map[string]any); ok {
-					redactSecrets(sub)
-				}
-			}
-		}
 	}
 }
 
@@ -220,6 +200,12 @@ func (g *Gateway) handleReloadConfig() http.HandlerFunc {
 		}
 
 		g.logger.Info("configuration reloaded successfully")
+		if g.auditLogger != nil {
+			g.auditLogger.Log(security.AuditEvent{
+				Type:   security.EventConfigChange,
+				Detail: "configuration reloaded via admin API",
+			})
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 	}
 }

@@ -29,6 +29,7 @@ type SubAgent struct {
 	mu           sync.Mutex
 	ID           string
 	ParentID     string
+	SessionID    string // owning session ID for cross-session isolation
 	Status       Status
 	SystemPrompt string
 	History      []provider.LLMMessage
