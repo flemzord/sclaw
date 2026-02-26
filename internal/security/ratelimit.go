@@ -105,9 +105,15 @@ func (rl *RateLimiter) Allow(kind string) error {
 	return nil
 }
 
+// TODO: For high-volume token counting, consider storing a counter per time
+// bucket rather than individual timestamps to reduce memory usage.
+
 // AllowN checks whether n events of the given kind are allowed.
 // Useful for token counting where a single request consumes multiple tokens.
 func (rl *RateLimiter) AllowN(kind string, n int) error {
+	if n <= 0 {
+		return nil
+	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -135,14 +141,18 @@ func (rl *RateLimiter) MaxSessions() int {
 }
 
 // evict removes events outside the sliding window.
+// It uses the copy-and-clear pattern to release backing array memory
+// and avoid unbounded growth of the underlying array.
 func (b *bucket) evict(now time.Time) {
 	cutoff := now.Add(-b.window)
-	// Find the first event within the window (events are chronologically ordered).
 	i := 0
 	for i < len(b.events) && b.events[i].Before(cutoff) {
 		i++
 	}
 	if i > 0 {
-		b.events = b.events[i:]
+		remaining := len(b.events) - i
+		copy(b.events, b.events[i:])
+		clear(b.events[remaining:])
+		b.events = b.events[:remaining]
 	}
 }

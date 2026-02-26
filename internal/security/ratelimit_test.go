@@ -142,3 +142,55 @@ func TestRateLimiter_AllowN_Unknown(t *testing.T) {
 		t.Fatalf("expected nil for unknown kind, got %v", err)
 	}
 }
+
+func TestRateLimiter_AllowN_ZeroAndNegative(t *testing.T) {
+	t.Parallel()
+
+	// Fill the bucket to the limit.
+	rl := NewRateLimiter(RateLimitConfig{TokensPerHour: 1})
+	if err := rl.AllowN("token", 1); err != nil {
+		t.Fatalf("unexpected error filling bucket: %v", err)
+	}
+
+	// Bucket is full, but AllowN(0) and AllowN(-1) should still return nil.
+	if err := rl.AllowN("token", 0); err != nil {
+		t.Fatalf("AllowN(0) = %v, want nil", err)
+	}
+	if err := rl.AllowN("token", -5); err != nil {
+		t.Fatalf("AllowN(-5) = %v, want nil", err)
+	}
+}
+
+func TestBucketEvict_ReleasesMemory(t *testing.T) {
+	t.Parallel()
+
+	// Use a 1-second window and add many events spread over multiple windows.
+	// After eviction, the backing array should not grow unbounded.
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	b := &bucket{
+		window: time.Second,
+		limit:  1000,
+	}
+
+	const rounds = 50
+	const eventsPerRound = 10
+
+	for round := range rounds {
+		// Advance time by 2 seconds to expire all previous events.
+		now = now.Add(2 * time.Second)
+		for range eventsPerRound {
+			b.evict(now)
+			b.events = append(b.events, now)
+		}
+		_ = round
+	}
+
+	// After many eviction cycles, the slice cap should be bounded.
+	// With the copy-clear pattern, cap stays close to the live window size,
+	// not growing proportional to total events ever added.
+	maxExpectedCap := eventsPerRound * 4 // generous headroom
+	if cap(b.events) > maxExpectedCap {
+		t.Errorf("cap(b.events) = %d after %d rounds, want <= %d (memory leak detected)",
+			cap(b.events), rounds, maxExpectedCap)
+	}
+}
