@@ -14,6 +14,7 @@ import (
 	_ "github.com/flemzord/sclaw/internal/gateway"
 	_ "github.com/flemzord/sclaw/internal/node"
 	_ "github.com/flemzord/sclaw/modules/provider/openai_compatible"
+	_ "github.com/flemzord/sclaw/modules/provider/openrouter"
 )
 
 // Set by goreleaser ldflags.
