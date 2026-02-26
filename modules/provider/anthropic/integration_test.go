@@ -4,6 +4,8 @@ package anthropic
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -95,7 +97,7 @@ func integrationProvider(t *testing.T) *Anthropic {
 	}
 	a.config.defaults()
 
-	ctx := core.NewAppContext(nil, t.TempDir(), t.TempDir())
+	ctx := core.NewAppContext(slog.New(slog.NewTextHandler(io.Discard, nil)), t.TempDir(), t.TempDir())
 	if err := a.Provision(ctx); err != nil {
 		t.Fatalf("Provision failed: %v", err)
 	}

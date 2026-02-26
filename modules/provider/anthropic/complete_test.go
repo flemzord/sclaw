@@ -3,6 +3,8 @@ package anthropic
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -173,7 +175,9 @@ func newTestProvider(baseURL string) *Anthropic {
 			Model:     "claude-sonnet-4-5-20250929",
 			MaxTokens: 4096,
 		},
-		client:        &client,
-		contextWindow: 200_000,
+		client:         &client,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		contextWindow:  200_000,
+		apiKeyResolved: true,
 	}
 }
