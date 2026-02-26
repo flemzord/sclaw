@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -10,7 +11,8 @@ import (
 // Validate checks the structural validity of a Config.
 // It verifies the version field, ensures modules are present,
 // and checks that all referenced module IDs exist in the registry.
-// It also enforces that Configurable modules have a config entry.
+// It also enforces that Configurable modules have a config entry
+// and validates plugin and security settings.
 func Validate(cfg *Config) error {
 	var errs []error
 
@@ -40,5 +42,42 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	errs = append(errs, validatePlugins(cfg.Plugins)...)
+	errs = append(errs, validateSecurity(cfg.Security)...)
+
 	return errors.Join(errs...)
+}
+
+func validatePlugins(plugins []PluginEntry) []error {
+	var errs []error
+	for i, p := range plugins {
+		if p.Module == "" {
+			errs = append(errs, fmt.Errorf("config: plugins[%d]: module path is required", i))
+		}
+	}
+	return errs
+}
+
+func validateSecurity(sec *SecurityConfig) []error {
+	if sec == nil {
+		return nil
+	}
+	var errs []error
+
+	if sec.Plugins.RequireCertified && len(sec.Plugins.TrustedKeys) == 0 {
+		errs = append(errs, errors.New("config: security.plugins.require_certified is true but no trusted_keys provided"))
+	}
+
+	for i, hexKey := range sec.Plugins.TrustedKeys {
+		raw, err := hex.DecodeString(hexKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("config: security.plugins.trusted_keys[%d]: invalid hex: %w", i, err))
+			continue
+		}
+		if len(raw) != 32 { // ed25519.PublicKeySize
+			errs = append(errs, fmt.Errorf("config: security.plugins.trusted_keys[%d]: invalid key size: got %d, want 32", i, len(raw)))
+		}
+	}
+
+	return errs
 }

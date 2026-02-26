@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -110,7 +111,31 @@ func (a *App) cleanup() {
 	a.modules = nil
 }
 
+// ReloadModules calls Reload on all loaded modules that implement Reloader.
+// Returns a joined error if any module fails to reload.
+func (a *App) ReloadModules(ctx *AppContext) error {
+	var errs []error
+	for i := range a.modules {
+		mi := &a.modules[i]
+		r, ok := mi.module.(Reloader)
+		if !ok {
+			continue
+		}
+		moduleCtx := ctx.ForModule(mi.id)
+		a.logger.Info("reloading module", "module", string(mi.id))
+		if err := r.Reload(moduleCtx); err != nil {
+			a.logger.Error("module reload failed", "module", string(mi.id), "error", err)
+			errs = append(errs, fmt.Errorf("reloading module %s: %w", mi.id, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Run starts all modules and blocks until a shutdown signal is received.
+//
+// Deprecated: Use pkg/app.Run() for production usage. It adds hot config
+// reload (SIGHUP + file polling) and plugin bootstrapping. This method is
+// retained for simple/test scenarios that do not need reload support.
 func (a *App) Run() error {
 	if err := a.Start(); err != nil {
 		return err

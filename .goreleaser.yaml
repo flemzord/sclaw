@@ -1,8 +1,26 @@
 version: 2
 
 builds:
-  - main: ./cmd/sclaw
+  - id: sclaw
+    main: ./cmd/sclaw
     binary: sclaw
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: xsclaw
+    main: ./cmd/xsclaw
+    binary: xsclaw
     env:
       - CGO_ENABLED=0
     goos:
