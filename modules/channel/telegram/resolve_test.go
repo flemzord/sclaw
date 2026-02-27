@@ -7,19 +7,6 @@ import (
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
-// mockFileClient implements the subset of Client needed by resolveMediaURLs.
-type mockFileClient struct {
-	Client
-	files map[string]*File
-}
-
-func (c *mockFileClient) GetFile(ctx context.Context, fileID string) (*File, error) {
-	if f, ok := c.files[fileID]; ok {
-		return f, nil
-	}
-	return nil, context.DeadlineExceeded
-}
-
 func TestResolveMediaURLs_ResolvesImageBlocks(t *testing.T) {
 	t.Parallel()
 

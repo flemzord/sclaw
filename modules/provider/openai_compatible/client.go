@@ -13,17 +13,16 @@ import (
 )
 
 // openAI wire types for JSON serialization.
-
 type oaiRequest struct {
-	Model         string               `json:"model"`
-	Messages      []oaiRequestMessage  `json:"messages"`
-	Tools         []oaiTool            `json:"tools,omitempty"`
-	Stream        bool                 `json:"stream,omitempty"`
-	StreamOptions *oaiStreamOptions    `json:"stream_options,omitempty"`
-	MaxTokens     int                  `json:"max_tokens,omitempty"`
-	Temperature   *float64             `json:"temperature,omitempty"`
-	TopP          *float64             `json:"top_p,omitempty"`
-	Stop          []string             `json:"stop,omitempty"`
+	Model         string              `json:"model"`
+	Messages      []oaiRequestMessage `json:"messages"`
+	Tools         []oaiTool           `json:"tools,omitempty"`
+	Stream        bool                `json:"stream,omitempty"`
+	StreamOptions *oaiStreamOptions   `json:"stream_options,omitempty"`
+	MaxTokens     int                 `json:"max_tokens,omitempty"`
+	Temperature   *float64            `json:"temperature,omitempty"`
+	TopP          *float64            `json:"top_p,omitempty"`
+	Stop          []string            `json:"stop,omitempty"`
 }
 
 // oaiStreamOptions controls streaming behavior.

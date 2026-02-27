@@ -40,6 +40,7 @@ const (
 // ContentPartType discriminates the variant of a ContentPart.
 type ContentPartType string
 
+// ContentPartType constants for multimodal message elements.
 const (
 	ContentPartText     ContentPartType = "text"
 	ContentPartImageURL ContentPartType = "image_url"
