@@ -338,6 +338,30 @@ func TestEstimateMessages(t *testing.T) {
 	}
 }
 
+func TestEstimateMessages_WithImageParts(t *testing.T) {
+	t.Parallel()
+
+	est := ctxengine.NewCharEstimator(0) // default ratio 4.0
+
+	messages := []provider.LLMMessage{
+		{
+			Role: provider.MessageRoleUser,
+			ContentParts: []provider.ContentPart{
+				{Type: provider.ContentPartImageURL, ImageURL: &provider.ImageURL{URL: "https://example.com/photo.jpg"}},
+				{Type: provider.ContentPartText, Text: "What is this?"},
+			},
+		},
+	}
+
+	got := ctxengine.EstimateMessages(est, messages)
+
+	// overhead(4) + image(765) + text("What is this?"=14 → int(14/4)+1=4) = 773
+	want := 4 + 765 + 4
+	if got != want {
+		t.Errorf("EstimateMessages(image+text) = %d, want %d", got, want)
+	}
+}
+
 func TestEstimateMessages_MultipleMessages(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,9 @@
 package provider
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Role describes the purpose a provider serves in the system.
 type Role string
@@ -34,14 +37,68 @@ const (
 	FinishReasonFiltering FinishReason = "filtering"
 )
 
+// ContentPartType discriminates the variant of a ContentPart.
+type ContentPartType string
+
+const (
+	ContentPartText     ContentPartType = "text"
+	ContentPartImageURL ContentPartType = "image_url"
+)
+
+// ContentPart represents one element of a multimodal message.
+type ContentPart struct {
+	Type     ContentPartType `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *ImageURL       `json:"image_url,omitempty"`
+}
+
+// ImageURL holds the URL and optional detail level for an image part.
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // "auto", "low", "high"
+}
+
 // LLMMessage represents a single message in a conversation.
+// When ContentParts is non-nil it is the source of truth for message content;
+// Content remains empty. Text-only messages use Content alone (ContentParts nil).
 type LLMMessage struct {
-	Role      MessageRole `json:"role"`
-	Content   string      `json:"content"`
-	Name      string      `json:"name,omitempty"`
-	ToolID    string      `json:"tool_id,omitempty"`
-	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
-	IsError   bool        `json:"is_error,omitempty"`
+	Role         MessageRole   `json:"role"`
+	Content      string        `json:"content"`
+	ContentParts []ContentPart `json:"content_parts,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	ToolID       string        `json:"tool_id,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+	IsError      bool          `json:"is_error,omitempty"`
+}
+
+// TextForDisplay returns the text representation of the message content.
+// If Content is set it is returned directly; otherwise text parts from
+// ContentParts are concatenated. Useful for consumers that only need text
+// (memory extraction, logging, persistence).
+func (m LLMMessage) TextForDisplay() string {
+	if m.Content != "" {
+		return m.Content
+	}
+	var b strings.Builder
+	for _, p := range m.ContentParts {
+		if p.Type == ContentPartText && p.Text != "" {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
+}
+
+// HasImages reports whether the message contains image content parts.
+func (m LLMMessage) HasImages() bool {
+	for _, p := range m.ContentParts {
+		if p.Type == ContentPartImageURL {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolCall represents a tool invocation requested by the model.

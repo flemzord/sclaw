@@ -37,6 +37,80 @@ func TestMessageToLLM(t *testing.T) {
 	}
 }
 
+func TestMessageToLLM_TextOnly_Unchanged(t *testing.T) {
+	t.Parallel()
+
+	msg := message.InboundMessage{
+		Blocks: []message.ContentBlock{
+			message.NewTextBlock("just text"),
+		},
+	}
+
+	llmMsg := messageToLLM(msg)
+
+	if llmMsg.Content != "just text" {
+		t.Errorf("Content = %q, want %q", llmMsg.Content, "just text")
+	}
+	if llmMsg.ContentParts != nil {
+		t.Error("ContentParts should be nil for text-only messages")
+	}
+}
+
+func TestMessageToLLM_ImageOnly(t *testing.T) {
+	t.Parallel()
+
+	msg := message.InboundMessage{
+		Blocks: []message.ContentBlock{
+			message.NewImageBlock("https://example.com/photo.jpg", "image/jpeg"),
+		},
+	}
+
+	llmMsg := messageToLLM(msg)
+
+	if llmMsg.Content != "" {
+		t.Errorf("Content = %q, want empty", llmMsg.Content)
+	}
+	if len(llmMsg.ContentParts) != 1 {
+		t.Fatalf("ContentParts len = %d, want 1", len(llmMsg.ContentParts))
+	}
+	p := llmMsg.ContentParts[0]
+	if p.Type != provider.ContentPartImageURL {
+		t.Errorf("part type = %q, want %q", p.Type, provider.ContentPartImageURL)
+	}
+	if p.ImageURL == nil || p.ImageURL.URL != "https://example.com/photo.jpg" {
+		t.Errorf("image URL = %v", p.ImageURL)
+	}
+}
+
+func TestMessageToLLM_TextAndImage(t *testing.T) {
+	t.Parallel()
+
+	msg := message.InboundMessage{
+		Blocks: []message.ContentBlock{
+			message.NewImageBlock("https://example.com/photo.jpg", "image/jpeg"),
+			message.NewTextBlock("What is this?"),
+		},
+	}
+
+	llmMsg := messageToLLM(msg)
+
+	if llmMsg.Content != "" {
+		t.Errorf("Content = %q, want empty (multimodal)", llmMsg.Content)
+	}
+	if len(llmMsg.ContentParts) != 2 {
+		t.Fatalf("ContentParts len = %d, want 2", len(llmMsg.ContentParts))
+	}
+	if llmMsg.ContentParts[0].Type != provider.ContentPartImageURL {
+		t.Errorf("part[0] type = %q, want image_url", llmMsg.ContentParts[0].Type)
+	}
+	if llmMsg.ContentParts[1].Type != provider.ContentPartText {
+		t.Errorf("part[1] type = %q, want text", llmMsg.ContentParts[1].Type)
+	}
+	if llmMsg.ContentParts[1].Text != "What is this?" {
+		t.Errorf("part[1] text = %q", llmMsg.ContentParts[1].Text)
+	}
+}
+
 func TestBuildOutbound(t *testing.T) {
 	t.Parallel()
 

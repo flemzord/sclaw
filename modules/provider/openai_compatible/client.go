@@ -15,15 +15,15 @@ import (
 // openAI wire types for JSON serialization.
 
 type oaiRequest struct {
-	Model         string            `json:"model"`
-	Messages      []oaiMessage      `json:"messages"`
-	Tools         []oaiTool         `json:"tools,omitempty"`
-	Stream        bool              `json:"stream,omitempty"`
-	StreamOptions *oaiStreamOptions `json:"stream_options,omitempty"`
-	MaxTokens     int               `json:"max_tokens,omitempty"`
-	Temperature   *float64          `json:"temperature,omitempty"`
-	TopP          *float64          `json:"top_p,omitempty"`
-	Stop          []string          `json:"stop,omitempty"`
+	Model         string               `json:"model"`
+	Messages      []oaiRequestMessage  `json:"messages"`
+	Tools         []oaiTool            `json:"tools,omitempty"`
+	Stream        bool                 `json:"stream,omitempty"`
+	StreamOptions *oaiStreamOptions    `json:"stream_options,omitempty"`
+	MaxTokens     int                  `json:"max_tokens,omitempty"`
+	Temperature   *float64             `json:"temperature,omitempty"`
+	TopP          *float64             `json:"top_p,omitempty"`
+	Stop          []string             `json:"stop,omitempty"`
 }
 
 // oaiStreamOptions controls streaming behavior.
@@ -31,6 +31,32 @@ type oaiStreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+// oaiRequestMessage is the wire type for outgoing messages in API requests.
+// Content is any so that json.Marshal produces a string for text-only messages
+// and an array of content parts for multimodal messages.
+type oaiRequestMessage struct {
+	Role       string        `json:"role"`
+	Content    any           `json:"content"`
+	Name       string        `json:"name,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
+}
+
+// oaiContentPart is a single element in a multimodal content array.
+type oaiContentPart struct {
+	Type     string       `json:"type"`
+	Text     string       `json:"text,omitempty"`
+	ImageURL *oaiImageURL `json:"image_url,omitempty"`
+}
+
+// oaiImageURL holds the URL and detail level for an image content part.
+type oaiImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// oaiMessage is the wire type for incoming messages in API responses.
+// Content is always a string because LLMs do not return multimodal responses.
 type oaiMessage struct {
 	Role       string        `json:"role"`
 	Content    string        `json:"content"`
@@ -80,13 +106,33 @@ type oaiUsage struct {
 // buildRequest converts a provider.CompletionRequest into an oaiRequest.
 // configMaxTokens is used as a fallback when req.MaxTokens is zero.
 func buildRequest(model string, configMaxTokens int, req provider.CompletionRequest, stream bool) oaiRequest {
-	messages := make([]oaiMessage, len(req.Messages))
+	messages := make([]oaiRequestMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		msg := oaiMessage{
-			Role:    string(m.Role),
-			Content: m.Content,
-			Name:    m.Name,
+		msg := oaiRequestMessage{
+			Role: string(m.Role),
+			Name: m.Name,
 		}
+
+		// Multimodal: serialize content as array of parts.
+		if len(m.ContentParts) > 0 {
+			parts := make([]oaiContentPart, 0, len(m.ContentParts))
+			for _, p := range m.ContentParts {
+				switch p.Type {
+				case provider.ContentPartText:
+					parts = append(parts, oaiContentPart{Type: "text", Text: p.Text})
+				case provider.ContentPartImageURL:
+					cp := oaiContentPart{
+						Type:     "image_url",
+						ImageURL: &oaiImageURL{URL: p.ImageURL.URL, Detail: p.ImageURL.Detail},
+					}
+					parts = append(parts, cp)
+				}
+			}
+			msg.Content = parts
+		} else {
+			msg.Content = m.Content
+		}
+
 		if m.ToolID != "" {
 			msg.ToolCallID = m.ToolID
 		}
