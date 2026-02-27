@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
 	"github.com/flemzord/sclaw/internal/router"
@@ -342,6 +343,50 @@ func TestMultiAgentFactory_BuildLoopConfig_InvalidTimeout(t *testing.T) {
 
 	if lc.Timeout != 0 {
 		t.Errorf("Timeout = %v, want 0 for invalid duration string", lc.Timeout)
+	}
+}
+
+func TestFactory_ResolveHistory_WithOverride(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	// Use an in-memory store as the module-provided override.
+	override := memory.NewInMemoryHistoryStore()
+
+	factory := NewFactory(FactoryConfig{
+		Registry:     reg,
+		Logger:       slog.Default(),
+		HistoryStore: override,
+	})
+	defer func() { _ = factory.Close() }()
+
+	store := factory.ResolveHistory("bot")
+	if store == nil {
+		t.Fatal("expected non-nil store")
+	}
+	if store != override {
+		t.Error("expected ResolveHistory to return the injected HistoryStore, not a new SQLite store")
+	}
+
+	// Second call should return the same cached instance.
+	store2 := factory.ResolveHistory("bot")
+	if store2 != override {
+		t.Error("expected cached store to be the injected override")
 	}
 }
 

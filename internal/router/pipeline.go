@@ -160,6 +160,7 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	// session pointer (R1 fix).
 	loop, err := p.cfg.AgentFactory.ForSession(session, env.Message)
 	if err != nil {
+		logger.Error("pipeline: agent initialization failed", "error", err, "session_id", session.ID, "agent_id", session.AgentID)
 		p.sendError(ctx, env.Message, "Failed to initialize agent.")
 		return PipelineResult{Session: session, Error: err}
 	}
@@ -317,6 +318,7 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 // sendError sends a user-friendly error message via ResponseSender. Never panics.
 func (p *Pipeline) sendError(ctx context.Context, original message.InboundMessage, text string) {
 	errMsg := message.NewTextMessage(original.Chat, text)
+	errMsg.Channel = original.Channel
 	errMsg.ThreadID = original.ThreadID
 	errMsg.ReplyToID = original.ID
 	if err := p.cfg.ResponseSender.Send(ctx, errMsg); err != nil {
