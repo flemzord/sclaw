@@ -73,7 +73,20 @@ func EstimateMessages(estimator TokenEstimator, messages []provider.LLMMessage) 
 	for i := range messages {
 		// Per-message overhead: role tokens + formatting (~4 tokens).
 		total += 4
-		total += estimator.Estimate(messages[i].Content)
+
+		if len(messages[i].ContentParts) > 0 {
+			for _, p := range messages[i].ContentParts {
+				switch p.Type {
+				case provider.ContentPartText:
+					total += estimator.Estimate(p.Text)
+				case provider.ContentPartImageURL:
+					// Conservative estimate for "auto" detail images (~765 tokens).
+					total += 765
+				}
+			}
+		} else {
+			total += estimator.Estimate(messages[i].Content)
+		}
 
 		if messages[i].Name != "" {
 			total += estimator.Estimate(messages[i].Name)

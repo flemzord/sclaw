@@ -47,8 +47,8 @@ Facts:`
 func (e *LLMExtractor) Extract(ctx context.Context, exchange Exchange) ([]Fact, error) {
 	prompt := fmt.Sprintf(
 		extractionPrompt,
-		exchange.UserMessage.Content,
-		exchange.AssistantMessage.Content,
+		exchange.UserMessage.TextForDisplay(),
+		exchange.AssistantMessage.TextForDisplay(),
 	)
 
 	resp, err := e.provider.Complete(ctx, provider.CompletionRequest{

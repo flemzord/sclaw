@@ -50,10 +50,43 @@ type AgentFactory interface {
 }
 
 // messageToLLM converts an inbound message to a user-role LLM message.
+// When the message contains images, ContentParts is populated instead of Content.
 func messageToLLM(msg message.InboundMessage) provider.LLMMessage {
+	if !msg.HasMedia() {
+		return provider.LLMMessage{
+			Role:    provider.MessageRoleUser,
+			Content: msg.TextContent(),
+		}
+	}
+
+	var parts []provider.ContentPart
+	for _, block := range msg.Blocks {
+		switch block.Type {
+		case message.BlockText:
+			if block.Text != "" {
+				parts = append(parts, provider.ContentPart{
+					Type: provider.ContentPartText,
+					Text: block.Text,
+				})
+			}
+		case message.BlockImage:
+			parts = append(parts, provider.ContentPart{
+				Type:     provider.ContentPartImageURL,
+				ImageURL: &provider.ImageURL{URL: block.URL, Detail: "auto"},
+			})
+		}
+	}
+
+	if len(parts) == 0 {
+		return provider.LLMMessage{
+			Role:    provider.MessageRoleUser,
+			Content: msg.TextContent(),
+		}
+	}
+
 	return provider.LLMMessage{
-		Role:    provider.MessageRoleUser,
-		Content: msg.TextContent(),
+		Role:         provider.MessageRoleUser,
+		ContentParts: parts,
 	}
 }
 

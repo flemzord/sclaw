@@ -154,6 +154,13 @@ func (p *Poller) handleUpdate(update *Update) {
 		"blocks", len(msg.Blocks),
 	)
 
+	if msg.HasMedia() {
+		if err := resolveMediaURLs(p.ctx, p.client, &msg); err != nil {
+			p.logger.Warn("failed to resolve media URLs",
+				"update_id", update.UpdateID, "error", err)
+		}
+	}
+
 	if !p.allowList.IsAllowed(msg) {
 		p.logger.Debug("update denied by allow list",
 			"update_id", update.UpdateID,

@@ -208,6 +208,122 @@ func TestCompletionResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTextForDisplay_ContentOnly(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{Content: "hello world"}
+	if got := msg.TextForDisplay(); got != "hello world" {
+		t.Errorf("TextForDisplay() = %q, want %q", got, "hello world")
+	}
+}
+
+func TestTextForDisplay_ContentParts(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{
+		ContentParts: []ContentPart{
+			{Type: ContentPartText, Text: "Look at this"},
+			{Type: ContentPartImageURL, ImageURL: &ImageURL{URL: "https://example.com/img.jpg"}},
+			{Type: ContentPartText, Text: "What do you see?"},
+		},
+	}
+	want := "Look at this\nWhat do you see?"
+	if got := msg.TextForDisplay(); got != want {
+		t.Errorf("TextForDisplay() = %q, want %q", got, want)
+	}
+}
+
+func TestTextForDisplay_ImageOnly(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{
+		ContentParts: []ContentPart{
+			{Type: ContentPartImageURL, ImageURL: &ImageURL{URL: "https://example.com/img.jpg"}},
+		},
+	}
+	if got := msg.TextForDisplay(); got != "" {
+		t.Errorf("TextForDisplay() = %q, want empty", got)
+	}
+}
+
+func TestTextForDisplay_ContentTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{
+		Content:      "plain text",
+		ContentParts: []ContentPart{{Type: ContentPartText, Text: "part text"}},
+	}
+	if got := msg.TextForDisplay(); got != "plain text" {
+		t.Errorf("TextForDisplay() = %q, want %q (Content takes precedence)", got, "plain text")
+	}
+}
+
+func TestHasImages(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		msg  LLMMessage
+		want bool
+	}{
+		{"no parts", LLMMessage{Content: "hi"}, false},
+		{"text parts only", LLMMessage{ContentParts: []ContentPart{{Type: ContentPartText, Text: "hi"}}}, false},
+		{"with image", LLMMessage{ContentParts: []ContentPart{
+			{Type: ContentPartText, Text: "look"},
+			{Type: ContentPartImageURL, ImageURL: &ImageURL{URL: "https://example.com/img.jpg"}},
+		}}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.msg.HasImages(); got != tt.want {
+				t.Errorf("HasImages() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLLMMessageContentPartsOmitempty(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{Role: MessageRoleUser, Content: "hi"}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := raw["content_parts"]; ok {
+		t.Error("expected content_parts to be omitted when nil")
+	}
+}
+
+func TestContentPartJSONRoundTrip(t *testing.T) {
+	t.Parallel()
+	msg := LLMMessage{
+		Role: MessageRoleUser,
+		ContentParts: []ContentPart{
+			{Type: ContentPartText, Text: "describe this"},
+			{Type: ContentPartImageURL, ImageURL: &ImageURL{URL: "https://img.com/a.png", Detail: "auto"}},
+		},
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got LLMMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.ContentParts) != 2 {
+		t.Fatalf("content_parts len = %d, want 2", len(got.ContentParts))
+	}
+	if got.ContentParts[0].Type != ContentPartText || got.ContentParts[0].Text != "describe this" {
+		t.Errorf("part[0] = %+v", got.ContentParts[0])
+	}
+	if got.ContentParts[1].Type != ContentPartImageURL || got.ContentParts[1].ImageURL.URL != "https://img.com/a.png" {
+		t.Errorf("part[1] = %+v", got.ContentParts[1])
+	}
+}
+
 func TestRoleConstants(t *testing.T) {
 	t.Parallel()
 

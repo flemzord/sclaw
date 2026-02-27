@@ -44,7 +44,7 @@ func NewWebhookReceiver(client *Client, inbox func(message.InboundMessage) error
 // HandleWebhook processes a validated webhook payload from the gateway dispatcher.
 // It validates the Telegram-specific secret token header, parses the update,
 // checks the allow list, and pushes the message to the inbox.
-func (w *WebhookReceiver) HandleWebhook(_ context.Context, _ string, body []byte, headers http.Header) error {
+func (w *WebhookReceiver) HandleWebhook(ctx context.Context, _ string, body []byte, headers http.Header) error {
 	// Validate Telegram's secret token header if configured.
 	if w.secret != "" {
 		token := headers.Get("X-Telegram-Bot-Api-Secret-Token")
@@ -75,6 +75,13 @@ func (w *WebhookReceiver) HandleWebhook(_ context.Context, _ string, body []byte
 		"chat_type", msg.Chat.Type,
 		"blocks", len(msg.Blocks),
 	)
+
+	if msg.HasMedia() {
+		if err := resolveMediaURLs(ctx, w.client, &msg); err != nil {
+			w.logger.Warn("failed to resolve media URLs",
+				"update_id", update.UpdateID, "error", err)
+		}
+	}
 
 	if !w.allowList.IsAllowed(msg) {
 		w.logger.Debug("webhook update denied by allow list",
