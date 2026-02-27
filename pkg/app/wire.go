@@ -196,11 +196,15 @@ type rangeableSessionStore interface {
 }
 
 // sessionRangerAdapter bridges rangeableSessionStore to cron.SessionRanger.
+// It derives the session ID using the same persistenceKey formula as the
+// router pipeline, so the cron job looks up sessions by the same key
+// used to persist messages in the HistoryStore.
 type sessionRangerAdapter struct{ store rangeableSessionStore }
 
 func (a *sessionRangerAdapter) Range(fn func(sessionID, agentID string) bool) {
-	a.store.Range(func(_ router.SessionKey, s *router.Session) bool {
-		return fn(s.ID, s.AgentID)
+	a.store.Range(func(key router.SessionKey, s *router.Session) bool {
+		pKey := key.Channel + ":" + key.ChatID + ":" + key.ThreadID
+		return fn(pKey, s.AgentID)
 	})
 }
 
