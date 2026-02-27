@@ -41,6 +41,11 @@ type FactoryConfig struct {
 	// SanitizedEnv, if non-nil, provides a pre-sanitized set of environment
 	// variables passed to tools that spawn subprocesses.
 	SanitizedEnv []string
+
+	// HistoryStore, if non-nil, is used for all agents instead of
+	// opening per-agent SQLite databases. Provided by the active
+	// memory module (e.g., memory.obsidian or memory.sqlite).
+	HistoryStore memory.HistoryStore
 }
 
 // Factory resolves the agent for a session and creates an agent.Loop
@@ -209,6 +214,13 @@ func (f *Factory) ResolveHistory(agentID string) memory.HistoryStore {
 		return nil
 	}
 
+	// Use module-provided store if available.
+	if f.cfg.HistoryStore != nil {
+		f.stores[agentID] = f.cfg.HistoryStore
+		return f.cfg.HistoryStore
+	}
+
+	// Fallback: per-agent SQLite.
 	dbPath := filepath.Join(agentCfg.DataDir, "memory.db")
 	store, db, err := sqlite.OpenHistoryStore(dbPath)
 	if err != nil {

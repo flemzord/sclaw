@@ -9,6 +9,7 @@ import (
 	"github.com/flemzord/sclaw/internal/channel"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/cron"
+	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
@@ -125,6 +126,12 @@ func wireRouter(
 		urlFilter, _ = svc.(*security.URLFilter)
 	}
 
+	// Resolve memory module's history store (if any).
+	var historyStore memory.HistoryStore
+	if svc, ok := appCtx.GetService("memory.history"); ok {
+		historyStore, _ = svc.(memory.HistoryStore)
+	}
+
 	// Build the agent factory.
 	factory := multiagent.NewFactory(multiagent.FactoryConfig{
 		Registry:        registry,
@@ -134,6 +141,7 @@ func wireRouter(
 		AuditLogger:     auditLogger,
 		RateLimiter:     rateLimiter,
 		URLFilter:       urlFilter,
+		HistoryStore:    historyStore,
 	})
 
 	// Create sub-agent manager and wire it into the factory.
