@@ -182,8 +182,26 @@ func wireRouter(
 	// Register the session store for the gateway to discover.
 	appCtx.RegisterService("router.sessions", r.Sessions())
 
+	// Register the default provider for use by cron jobs (e.g. fact extraction).
+	appCtx.RegisterService("provider.default", defaultProvider)
+
 	logger.Info("router: wired", "channels", len(channels))
 	return nil
+}
+
+// rangeableSessionStore is the subset of router.SessionStore needed to iterate
+// sessions for cron jobs. Defined locally to avoid exporting a wide interface.
+type rangeableSessionStore interface {
+	Range(func(router.SessionKey, *router.Session) bool)
+}
+
+// sessionRangerAdapter bridges rangeableSessionStore to cron.SessionRanger.
+type sessionRangerAdapter struct{ store rangeableSessionStore }
+
+func (a *sessionRangerAdapter) Range(fn func(sessionID, agentID string) bool) {
+	a.store.Range(func(_ router.SessionKey, s *router.Session) bool {
+		return fn(s.ID, s.AgentID)
+	})
 }
 
 // schedulerModule wraps a *cron.Scheduler to satisfy core.Module, core.Starter,
@@ -220,8 +238,28 @@ func wireCron(
 
 	// Resolve the session store (optional — only available when the router is wired).
 	var sessionStore cron.SessionStore
+	var ranger cron.SessionRanger
 	if svc, ok := appCtx.GetService("router.sessions"); ok {
 		sessionStore, _ = svc.(cron.SessionStore)
+		if rs, ok := svc.(rangeableSessionStore); ok {
+			ranger = &sessionRangerAdapter{store: rs}
+		}
+	}
+
+	// Resolve memory dependencies for fact extraction.
+	var historyStore memory.HistoryStore
+	if svc, ok := appCtx.GetService("memory.history"); ok {
+		historyStore, _ = svc.(memory.HistoryStore)
+	}
+	var memoryStore memory.Store
+	if svc, ok := appCtx.GetService("memory.store"); ok {
+		memoryStore, _ = svc.(memory.Store)
+	}
+	var extractor memory.FactExtractor
+	if svc, ok := appCtx.GetService("provider.default"); ok {
+		if p, ok := svc.(provider.Provider); ok {
+			extractor = memory.NewLLMExtractor(p)
+		}
 	}
 
 	// Resolve multiagent registry for per-agent job configuration.
@@ -252,6 +290,10 @@ func wireCron(
 				Logger:       logger,
 				AgentID:      agentID,
 				ScheduleExpr: cronCfg.MemoryExtraction.ScheduleOrDefault(),
+				Sessions:     ranger,
+				History:      historyStore,
+				Store:        memoryStore,
+				Extractor:    extractor,
 			}); err != nil {
 				return fmt.Errorf("cron: registering memory extraction for agent %s: %w", agentID, err)
 			}
@@ -276,7 +318,13 @@ func wireCron(
 			}
 		}
 
-		if err := s.RegisterJob(&cron.MemoryExtractionJob{Logger: logger}); err != nil {
+		if err := s.RegisterJob(&cron.MemoryExtractionJob{
+			Logger:    logger,
+			Sessions:  ranger,
+			History:   historyStore,
+			Store:     memoryStore,
+			Extractor: extractor,
+		}); err != nil {
 			return fmt.Errorf("cron: registering memory extraction: %w", err)
 		}
 		if err := s.RegisterJob(&cron.MemoryCompactionJob{Logger: logger}); err != nil {

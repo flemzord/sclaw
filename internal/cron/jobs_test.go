@@ -2,10 +2,14 @@ package cron
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/flemzord/sclaw/internal/memory"
+	"github.com/flemzord/sclaw/internal/provider"
 )
 
 // testSessionStore implements SessionStore for job tests.
@@ -222,5 +226,221 @@ func TestMemoryCompactionJob_CancelledContext(t *testing.T) {
 	cancel()
 	if err := j.Run(ctx); err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+}
+
+// --- Test helpers for MemoryExtractionJob ---
+
+// testSessionRanger implements SessionRanger for tests.
+type testSessionRanger struct {
+	sessions []struct{ id, agentID string }
+}
+
+func (r *testSessionRanger) Range(fn func(string, string) bool) {
+	for _, s := range r.sessions {
+		if !fn(s.id, s.agentID) {
+			return
+		}
+	}
+}
+
+// staticExtractor returns pre-configured facts for every exchange.
+type staticExtractor struct {
+	facts []memory.Fact
+	err   error
+	calls int
+}
+
+func (e *staticExtractor) Extract(_ context.Context, ex memory.Exchange) ([]memory.Fact, error) {
+	e.calls++
+	if e.err != nil {
+		return nil, e.err
+	}
+	// Use call count to generate unique IDs across invocations.
+	result := make([]memory.Fact, len(e.facts))
+	for i, f := range e.facts {
+		f.Source = ex.SessionID
+		f.ID = fmt.Sprintf("%s-%d-%d", ex.SessionID, e.calls, i)
+		result[i] = f
+	}
+	return result, nil
+}
+
+func TestMemoryExtractionJob_Run_NilDepsNoop(t *testing.T) {
+	t.Parallel()
+	j := &MemoryExtractionJob{Logger: slog.Default()}
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMemoryExtractionJob_Run_ExtractsFacts(t *testing.T) {
+	t.Parallel()
+
+	history := memory.NewInMemoryHistoryStore()
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "I like Go"})
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Go is great!"})
+
+	store := memory.NewInMemoryStore()
+	extractor := &staticExtractor{
+		facts: []memory.Fact{{Content: "User likes Go"}},
+	}
+
+	ranger := &testSessionRanger{
+		sessions: []struct{ id, agentID string }{
+			{"sess1", "bot"},
+		},
+	}
+
+	j := &MemoryExtractionJob{
+		Logger:    slog.Default(),
+		AgentID:   "bot",
+		Sessions:  ranger,
+		History:   history,
+		Store:     store,
+		Extractor: extractor,
+	}
+
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if extractor.calls != 1 {
+		t.Errorf("extractor calls = %d, want 1", extractor.calls)
+	}
+	if store.Len() != 1 {
+		t.Errorf("store len = %d, want 1", store.Len())
+	}
+}
+
+func TestMemoryExtractionJob_Run_SkipsProcessed(t *testing.T) {
+	t.Parallel()
+
+	history := memory.NewInMemoryHistoryStore()
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "Hello"})
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Hi"})
+
+	store := memory.NewInMemoryStore()
+	extractor := &staticExtractor{
+		facts: []memory.Fact{{Content: "greeting"}},
+	}
+	ranger := &testSessionRanger{
+		sessions: []struct{ id, agentID string }{{"sess1", ""}},
+	}
+
+	j := &MemoryExtractionJob{
+		Logger:    slog.Default(),
+		Sessions:  ranger,
+		History:   history,
+		Store:     store,
+		Extractor: extractor,
+	}
+
+	// First run: should extract.
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	if extractor.calls != 1 {
+		t.Fatalf("run 1: extractor calls = %d, want 1", extractor.calls)
+	}
+
+	// Second run without new messages: should skip.
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+	if extractor.calls != 1 {
+		t.Errorf("run 2: extractor calls = %d, want 1 (no new messages)", extractor.calls)
+	}
+
+	// Append more messages, run again: should extract only new ones.
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "What's Go?"})
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "A language"})
+
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("run 3: %v", err)
+	}
+	if extractor.calls != 2 {
+		t.Errorf("run 3: extractor calls = %d, want 2", extractor.calls)
+	}
+	if store.Len() != 2 {
+		t.Errorf("store len = %d, want 2", store.Len())
+	}
+}
+
+func TestMemoryExtractionJob_Run_FiltersByAgent(t *testing.T) {
+	t.Parallel()
+
+	history := memory.NewInMemoryHistoryStore()
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "Hi"})
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Hello"})
+	_ = history.Append("sess2", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "Hey"})
+	_ = history.Append("sess2", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Yo"})
+
+	store := memory.NewInMemoryStore()
+	extractor := &staticExtractor{
+		facts: []memory.Fact{{Content: "fact"}},
+	}
+	ranger := &testSessionRanger{
+		sessions: []struct{ id, agentID string }{
+			{"sess1", "bot-a"},
+			{"sess2", "bot-b"},
+		},
+	}
+
+	j := &MemoryExtractionJob{
+		Logger:    slog.Default(),
+		AgentID:   "bot-a", // only process bot-a sessions
+		Sessions:  ranger,
+		History:   history,
+		Store:     store,
+		Extractor: extractor,
+	}
+
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only sess1 (bot-a) should be processed.
+	if extractor.calls != 1 {
+		t.Errorf("extractor calls = %d, want 1", extractor.calls)
+	}
+}
+
+func TestMemoryExtractionJob_Run_CircuitBreaker(t *testing.T) {
+	t.Parallel()
+
+	history := memory.NewInMemoryHistoryStore()
+	for i := range 5 {
+		sid := fmt.Sprintf("sess%d", i)
+		_ = history.Append(sid, provider.LLMMessage{Role: provider.MessageRoleUser, Content: "msg"})
+		_ = history.Append(sid, provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "reply"})
+	}
+
+	store := memory.NewInMemoryStore()
+	extractor := &staticExtractor{
+		err: fmt.Errorf("LLM unavailable"),
+	}
+	sessions := make([]struct{ id, agentID string }, 5)
+	for i := range 5 {
+		sessions[i] = struct{ id, agentID string }{fmt.Sprintf("sess%d", i), ""}
+	}
+	ranger := &testSessionRanger{sessions: sessions}
+
+	j := &MemoryExtractionJob{
+		Logger:    slog.Default(),
+		Sessions:  ranger,
+		History:   history,
+		Store:     store,
+		Extractor: extractor,
+	}
+
+	// Should not return an error (circuit breaker stops iteration, doesn't fail the job).
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Circuit breaker triggers after 3 consecutive errors.
+	if extractor.calls > 3 {
+		t.Errorf("extractor calls = %d, want <= 3 (circuit breaker)", extractor.calls)
 	}
 }
