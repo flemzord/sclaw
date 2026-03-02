@@ -1,0 +1,61 @@
+---
+title: Introduction
+description: "sclaw is a plugin-first, self-hosted personal AI assistant"
+icon: "hand-wave"
+---
+
+sclaw is a **plugin-first, self-hosted personal AI assistant** built in Go. Inspired by [Caddy](https://caddyserver.com/)'s modular architecture, sclaw treats everything as a module — channels, providers, memory backends, and tools are all pluggable components that can be mixed, matched, and extended.
+
+## Why sclaw?
+
+Most AI assistant frameworks are either too rigid (locked to a single provider) or too complex (requiring deep infrastructure knowledge). sclaw sits in the sweet spot:
+
+- **Single binary, zero dependencies** — Download and run. No Docker, no database server, no runtime.
+- **Plugin-first architecture** — Every component is a module. Swap providers, add channels, or extend functionality without forking.
+- **Config-driven** — A single YAML file controls everything. No code changes needed for most customizations.
+- **Defense-in-depth security** — Rate limiting, credential isolation, tool sandboxing, and audit logging built in from day one.
+- **Multi-agent routing** — Run multiple agents with different personalities, tools, and providers, routed by channel, user, or group.
+
+## Core Architecture
+
+sclaw's core handles orchestration while modules provide the actual capabilities:
+
+| Component | Responsibility |
+|-----------|---------------|
+| **Module Registry** | Discovers and wires modules at startup |
+| **Router** | 15-step message pipeline with session management |
+| **Agent Loop** | ReAct reasoning with tool execution |
+| **Context Engine** | Token budget management and history compaction |
+| **Provider Chain** | Model failover with health tracking |
+| **Memory System** | Two-tier recall (conversation + long-term facts) |
+
+## Built-in Modules
+
+<CardGroup cols={3}>
+  <Card title="Telegram" icon="telegram" href="/modules/channels/telegram">
+    Full-featured Telegram bot with polling, webhooks, and streaming support.
+  </Card>
+  <Card title="OpenAI-Compatible" icon="microchip-ai" href="/modules/providers/openai-compatible">
+    Connect to any OpenAI-compatible API — OpenAI, Anthropic, local models, and more.
+  </Card>
+  <Card title="SQLite Memory" icon="database" href="/modules/memory/sqlite">
+    Persistent conversation history and long-term facts with FTS5 search.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get sclaw running in 5 minutes with a Telegram bot.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/overview">
+    Deep dive into sclaw's YAML configuration.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand the 15-step message pipeline.
+  </Card>
+  <Card title="Security" icon="shield" href="/security/overview">
+    Learn about sclaw's defense-in-depth security model.
+  </Card>
+</CardGroup>

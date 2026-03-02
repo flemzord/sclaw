@@ -1,0 +1,126 @@
+---
+title: Complete Example
+description: "A fully annotated sclaw configuration file"
+icon: "file-code"
+---
+
+Below is a complete, annotated configuration file covering all major features of sclaw.
+
+```yaml
+# ─── Format Version ───────────────────────────────────────────
+# Required. Only "1" is currently supported.
+version: "1"
+
+# ─── Modules ──────────────────────────────────────────────────
+# Each key must match a compiled module ID (category.name).
+# Modules not listed here are not loaded.
+modules:
+
+  # SQLite-backed memory for conversation history and long-term facts.
+  # Empty config uses all defaults (WAL enabled, auto data dir).
+  memory.sqlite: {}
+
+  # Telegram channel — connects sclaw to a Telegram bot.
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"       # Required. Format: 123:ABCxyz
+    mode: "polling"                       # "polling" or "webhook"
+    allow_users: ["${TELEGRAM_USER_ID}"] # Restrict to your user ID
+    max_message_length: 4096              # Telegram's max (1-4096)
+    stream_flush_interval: 1s             # Streaming edit interval
+
+  # OpenAI-compatible provider — works with any OpenAI API.
+  provider.openai_compatible:
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000                # Model's context window
+    timeout: 30s                          # HTTP request timeout
+
+# ─── Agents ───────────────────────────────────────────────────
+# Multi-agent configuration. Omit this section for single-agent mode.
+agents:
+
+  # Primary agent — handles all Telegram messages by default.
+  main:
+    provider: "provider.openai_compatible"
+    memory:
+      enabled: true                       # Persist conversation history
+    routing:
+      channels: ["telegram"]              # Listen on Telegram
+      default: true                       # Fallback for unmatched messages
+    loop:
+      max_iterations: 10                  # Max ReAct loop cycles
+      timeout: "5m"                       # Per-invocation timeout
+
+  # Specialized coding agent — activated for a specific user.
+  coder:
+    provider: "provider.openai_compatible"
+    workspace: "/home/user/projects"      # Tool working directory
+    tools: ["exec", "read_file", "write_file"]
+    memory:
+      enabled: true
+    routing:
+      users: ["123456789"]                # Only this user triggers coder
+    loop:
+      max_iterations: 25                  # More iterations for complex tasks
+      timeout: "10m"
+      loop_threshold: 3                   # Break after 3 identical actions
+
+# ─── Security ─────────────────────────────────────────────────
+# All security features are optional. Omit for defaults (no limits).
+security:
+
+  # Rate limiting — sliding window per session.
+  rate_limits:
+    max_sessions: 10                      # Max concurrent sessions
+    messages_per_min: 30                  # Messages per minute per session
+    tool_calls_per_min: 60                # Tool calls per minute per session
+    tokens_per_hour: 100000               # Tokens per hour per session
+
+  # URL filtering — default-deny for network tools.
+  url_filter:
+    allow_domains:
+      - "api.openai.com"
+      - "api.anthropic.com"
+    deny_domains:
+      - "evil.example.com"
+
+  # Docker sandbox — optional isolation for tool execution.
+  # sandbox:
+  #   enabled: true
+  #   scopes_requiring_sandbox: ["exec", "read_write"]
+  #   image: "sclaw-sandbox:latest"
+  #   memory_mb: 512
+```
+
+## Minimal Configuration
+
+The simplest possible configuration that works:
+
+```yaml
+version: "1"
+
+modules:
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+  provider.openai_compatible:
+    base_url: "https://api.openai.com/v1"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000
+```
+
+<Note>
+Without `memory.sqlite`, conversation history is kept in memory only and lost on restart. Without `agents`, sclaw runs in single-agent mode using the first available provider.
+</Note>
+
+## Environment Variables
+
+This example uses the following environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | yes | Telegram Bot API token |
+| `TELEGRAM_USER_ID` | no | Your Telegram user ID for access control |
+| `OPENAI_API_KEY` | yes | OpenAI API key |
+| `OPENAI_BASE_URL` | no | Custom API endpoint (defaults to OpenAI) |

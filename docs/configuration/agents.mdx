@@ -1,0 +1,109 @@
+---
+title: Agent Configuration
+description: "Configure multi-agent routing, providers, and loop parameters"
+icon: "users"
+---
+
+The `agents` section enables multi-agent mode. Each key is an agent name, and its value configures routing, provider binding, and loop parameters. When `agents` is omitted, sclaw runs in **single-agent mode** with a default agent.
+
+## Agent Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `data_dir` | string | `{DataDir}/agents/{name}` | Persistent data directory for this agent. |
+| `workspace` | string | — | Working directory for tool execution. |
+| `provider` | string | — | Module ID of the provider to use (must exist in `modules`). |
+| `tools` | list | — | Tool names available to this agent. |
+| `memory` | object | — | Memory settings for this agent. |
+| `routing` | object | — | Routing rules for message dispatch. |
+| `loop` | object | — | ReAct loop parameter overrides. |
+
+## Routing
+
+Routing rules determine which agent handles an incoming message. The router evaluates agents **in declaration order** and picks the first match. At most one agent may be marked as `default`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `channels` | list | — | Channel names this agent handles (e.g., `["telegram"]`). |
+| `users` | list | — | User IDs this agent responds to. |
+| `groups` | list | — | Group IDs this agent responds to. |
+| `default` | bool | `false` | Fallback agent when no other routing rule matches. |
+
+<Warning>
+Only one agent may set `default: true`. If no agent matches and there is no default, the message is dropped.
+</Warning>
+
+## Loop Parameters
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_iterations` | int | `0` | Maximum ReAct loop iterations (0 = unlimited). |
+| `token_budget` | int | `0` | Token budget for the agent loop (0 = unlimited). |
+| `timeout` | string | — | Maximum duration for a single agent invocation (e.g., `"5m"`). |
+| `loop_threshold` | int | `0` | Consecutive identical actions before breaking the loop. |
+
+<Tip>
+Set `loop_threshold` to 3–5 to prevent the agent from getting stuck in repetitive tool call patterns. The loop detector tracks consecutive identical action signatures.
+</Tip>
+
+## Memory
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Whether conversation history is persisted for this agent. |
+
+When `enabled` is `false`, no SQLite database is opened for the agent, and conversation history is only kept in memory for the duration of the session.
+
+## Single-Agent Mode
+
+When the `agents` section is omitted entirely, sclaw runs in single-agent mode:
+
+```yaml
+version: "1"
+
+modules:
+  memory.sqlite: {}
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+  provider.openai_compatible:
+    base_url: "https://api.openai.com/v1"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000
+```
+
+## Multi-Agent Example
+
+```yaml
+agents:
+  main:
+    provider: "provider.openai_compatible"
+    memory:
+      enabled: true
+    routing:
+      channels: ["telegram"]
+      default: true
+    loop:
+      max_iterations: 10
+      timeout: "5m"
+
+  coder:
+    provider: "provider.openai_compatible"
+    workspace: "/home/user/projects"
+    tools: ["exec", "read_file", "write_file"]
+    memory:
+      enabled: true
+    routing:
+      users: ["123456789"]
+    loop:
+      max_iterations: 25
+      timeout: "10m"
+```
+
+In this setup:
+- **main** handles all Telegram messages by default
+- **coder** takes over when user `123456789` sends a message, with access to code execution tools and a longer iteration limit
+
+<Note>
+Each agent gets its own data directory, SOUL.md personality file, and (optionally) its own SQLite memory database. See [Agent Personality](/concepts/soul) and [Memory System](/concepts/memory) for details.
+</Note>

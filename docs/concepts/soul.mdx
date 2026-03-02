@@ -1,0 +1,126 @@
+---
+title: Agent Personality
+description: "Customize agent behavior with SOUL.md files"
+icon: "ghost"
+---
+
+Every sclaw agent can have a unique personality defined in a `SOUL.md` file. This Markdown file acts as the agent's system prompt — the instructions that shape how the agent thinks, communicates, and behaves.
+
+## How It Works
+
+SOUL.md is injected at the beginning of every LLM request as the system message. Changes take effect on the **next message** the agent processes — no restart required.
+
+### File Location
+
+Each agent reads its personality from:
+
+```
+{data_dir}/SOUL.md
+```
+
+When `data_dir` is not explicitly set, it defaults to:
+
+```
+{global_data_dir}/agents/{agent_name}/SOUL.md
+```
+
+### Hot-Reload
+
+SOUL.md uses stat-based cache invalidation:
+
+1. On each inbound message, the pipeline calls `SoulResolver.ResolveSoul(agentID)`.
+2. `SoulLoader` calls `os.Stat()` on the file (~1 microsecond).
+3. If the modification time is unchanged, the cached content is returned (fast path).
+4. If changed, the file is re-read and the cache is updated.
+
+<Tip>
+Hot-reload lets you tune agent personality in real time. Edit the file and send another message — instant feedback.
+</Tip>
+
+## Default Behavior
+
+When SOUL.md is missing, empty, or contains only whitespace, the agent uses the default prompt:
+
+```
+You are a helpful assistant.
+```
+
+Specifically:
+- **File does not exist** — returns default prompt, no error
+- **File is empty** — returns default prompt, no error
+- **File is only whitespace** — returns default prompt, no error
+- **File has content** — content is trimmed with `strings.TrimSpace()` and returned
+
+## Writing Guide
+
+A SOUL.md file is free-form Markdown with no required sections. A well-structured personality file typically includes:
+
+1. **Role definition** — Who the agent is and its primary purpose
+2. **Tone and style** — How it should communicate
+3. **Constraints** — What it should never do or always do
+4. **Domain knowledge** — Context about its operating environment
+5. **Boundaries** — Privacy, authorization, and safety rules
+
+### Tips
+
+- **Be specific about tone.** "Be concise" is better than "be professional."
+- **State constraints as rules, not suggestions.** "Never share private data" > "try to keep things private."
+- **Keep it focused.** The system prompt competes with conversation context for attention.
+- **Use Markdown formatting.** Headers, lists, and bold text help the model parse structure.
+- **Test with edge cases.** Try adversarial prompts to verify your constraints hold.
+
+## Example
+
+A realistic SOUL.md for a DevOps support agent:
+
+```markdown
+# DevOps Support Agent
+
+You are a senior DevOps engineer embedded in the platform team.
+Your job is to help developers debug infrastructure issues,
+review deployment configs, and explain system architecture.
+
+## Communication Style
+
+- Be direct and technical. Skip pleasantries.
+- Use code blocks for commands, configs, and logs.
+- When you don't know something, say so — don't guess.
+
+## Rules
+
+- Never run destructive commands without explicit confirmation.
+- Always check the runbook before suggesting manual interventions.
+- Escalate security issues to #security-oncall immediately.
+
+## Context
+
+- Infrastructure runs on AWS (EKS, RDS, S3).
+- CI/CD uses GitHub Actions with ArgoCD.
+- Monitoring: Prometheus + Grafana + PagerDuty.
+```
+
+## Multi-Agent Setup
+
+In a multi-agent configuration, each agent has its own `data_dir` and therefore its own SOUL.md:
+
+```yaml
+agents:
+  support:
+    data_dir: data/agents/support
+    routing:
+      channels: ["#help-desk"]
+
+  creative:
+    data_dir: data/agents/creative
+    routing:
+      channels: ["#brainstorm"]
+```
+
+This creates two independent personality files:
+
+```
+data/agents/support/SOUL.md   → professional, concise
+data/agents/creative/SOUL.md  → playful, creative
+```
+
+Each agent's `SoulLoader` is lazily created on first message and cached. Updating one agent's personality does not affect the other.

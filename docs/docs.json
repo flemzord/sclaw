@@ -1,0 +1,115 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "sclaw",
+  "logo": {
+    "dark": "/favicon.svg",
+    "light": "/favicon.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#16A34A",
+    "light": "#22C55E",
+    "dark": "#15803D"
+  },
+  "navbar": {
+    "links": [
+      {
+        "type": "github",
+        "href": "https://github.com/flemzord/sclaw"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get Started",
+      "href": "/quickstart"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "icon": "rocket",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "icon": "gear",
+            "pages": [
+              "configuration/overview",
+              "configuration/modules",
+              "configuration/agents",
+              "configuration/security",
+              "configuration/plugins",
+              "configuration/example"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "icon": "lightbulb",
+            "pages": [
+              "concepts/architecture",
+              "concepts/agent-loop",
+              "concepts/memory",
+              "concepts/soul",
+              "concepts/tools",
+              "concepts/routing",
+              "concepts/context"
+            ]
+          },
+          {
+            "group": "Modules",
+            "icon": "puzzle-piece",
+            "pages": [
+              "modules/channels/telegram",
+              "modules/providers/openai-compatible",
+              "modules/memory/sqlite"
+            ]
+          },
+          {
+            "group": "Security",
+            "icon": "shield",
+            "pages": [
+              "security/overview",
+              "security/credentials",
+              "security/prompt-injection",
+              "security/sandboxing"
+            ]
+          },
+          {
+            "group": "Development",
+            "icon": "code",
+            "pages": [
+              "development/setup",
+              "development/creating-modules",
+              "development/conventions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/flemzord/sclaw"
+    }
+  },
+  "layout": "sidenav",
+  "sidebar": {
+    "items": "border"
+  },
+  "rounded": "default",
+  "feedback": {
+    "thumbsRating": true
+  },
+  "search": {
+    "prompt": "Search sclaw docs..."
+  }
+}

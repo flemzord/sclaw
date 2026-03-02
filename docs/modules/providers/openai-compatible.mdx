@@ -1,0 +1,146 @@
+---
+title: OpenAI-Compatible Provider
+description: "Connect to any OpenAI-compatible API — OpenAI, Anthropic, local models, and more"
+icon: "microchip-ai"
+---
+
+The `provider.openai_compatible` module connects sclaw to any API that implements the OpenAI Chat Completions interface. This includes OpenAI, Azure OpenAI, Anthropic (via proxy), Ollama, vLLM, LM Studio, and many other local and cloud providers.
+
+## Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `base_url` | string | — | API base URL (must be http or https). **Required.** |
+| `api_key` | string | — | API key. One of `api_key` or `api_key_env` is **required**. |
+| `api_key_env` | string | — | Environment variable name containing the API key. |
+| `model` | string | — | Model identifier (e.g., `"gpt-4o"`). **Required.** |
+| `context_window` | int | `4096` | Maximum context window size in tokens. |
+| `max_tokens` | int | `0` | Maximum tokens to generate (0 = provider default). |
+| `headers` | map | — | Extra HTTP headers sent with every request. |
+| `timeout` | duration | `30s` | HTTP request timeout. |
+
+## Provider Examples
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```yaml
+    modules:
+      provider.openai_compatible:
+        base_url: "https://api.openai.com/v1"
+        api_key: "${OPENAI_API_KEY}"
+        model: "gpt-4o"
+        context_window: 128000
+        timeout: 30s
+    ```
+  </Tab>
+  <Tab title="Anthropic (via proxy)">
+    ```yaml
+    modules:
+      provider.openai_compatible:
+        base_url: "https://anthropic-openai-proxy.example.com/v1"
+        api_key: "${ANTHROPIC_API_KEY}"
+        model: "claude-sonnet-4-20250514"
+        context_window: 200000
+        timeout: 60s
+    ```
+  </Tab>
+  <Tab title="Ollama (local)">
+    ```yaml
+    modules:
+      provider.openai_compatible:
+        base_url: "http://localhost:11434/v1"
+        api_key: "ollama"
+        model: "llama3.1:70b"
+        context_window: 131072
+        timeout: 120s
+    ```
+  </Tab>
+  <Tab title="Azure OpenAI">
+    ```yaml
+    modules:
+      provider.openai_compatible:
+        base_url: "https://your-resource.openai.azure.com/openai/deployments/gpt-4o"
+        api_key: "${AZURE_OPENAI_API_KEY}"
+        model: "gpt-4o"
+        context_window: 128000
+        headers:
+          api-version: "2024-02-15-preview"
+    ```
+  </Tab>
+</Tabs>
+
+## Authentication
+
+The provider supports two authentication methods:
+
+### Direct API Key
+
+Embed the key directly (with environment variable expansion):
+
+```yaml
+api_key: "${OPENAI_API_KEY}"
+```
+
+### Environment Variable Reference
+
+Reference an environment variable by name:
+
+```yaml
+api_key_env: "OPENAI_API_KEY"
+```
+
+<Tip>
+Use `api_key_env` when the same configuration file is shared across environments with different variable names, or when you want to be explicit about which variable is used.
+</Tip>
+
+## Custom Headers
+
+Add extra HTTP headers for providers that require additional authentication or routing:
+
+```yaml
+modules:
+  provider.openai_compatible:
+    base_url: "https://api.example.com/v1"
+    api_key: "${API_KEY}"
+    model: "custom-model"
+    headers:
+      X-Organization: "my-org-id"
+      X-Project: "sclaw-production"
+```
+
+## Streaming
+
+The provider supports streaming responses via the OpenAI streaming API. When streaming is enabled (default for channels that support it), the provider:
+
+1. Sends a streaming request to the API
+2. Yields text chunks as they arrive
+3. Accumulates tool call fragments
+4. Reports token usage at stream end
+
+## Context Window
+
+Set `context_window` to match your model's maximum context size. The context engine uses this value to:
+
+- Calculate available token budget for history and memory
+- Trigger compaction when the budget is exceeded
+- Reserve space for the model's response
+
+```yaml
+context_window: 128000  # GPT-4o supports 128K tokens
+```
+
+<Warning>
+Setting `context_window` higher than the model's actual limit will cause API errors. Always verify the model's specification.
+</Warning>
+
+## Provider Chain
+
+In multi-agent setups, different agents can reference different providers. sclaw supports failover with health tracking:
+
+| Role | Description |
+|------|-------------|
+| **Primary** | First choice for all requests. |
+| **Internal** | Used for system tasks (summarization, fact extraction). |
+| **Fallback** | Activated when primary is unhealthy. |
+
+Health is tracked per-provider using success/failure counters. A provider is marked unhealthy after consecutive failures and re-checked periodically.

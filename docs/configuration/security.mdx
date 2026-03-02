@@ -1,0 +1,126 @@
+---
+title: Security Configuration
+description: "Configure rate limits, sandboxing, and URL filtering"
+icon: "shield"
+---
+
+The optional `security` section configures defense-in-depth features. When omitted, defaults apply (no rate limits, sandbox disabled, no URL filtering).
+
+## Plugin Certification
+
+Controls plugin certification requirements.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `require_certified` | bool | `false` | Reject uncertified plugins at build time. |
+| `trusted_keys` | list | — | Hex-encoded Ed25519 public keys (32 bytes each) allowed to sign plugins. |
+
+```yaml
+security:
+  plugins:
+    require_certified: true
+    trusted_keys:
+      - "a1b2c3d4e5f6..."
+```
+
+<Warning>
+When `require_certified` is `true`, `trusted_keys` is required and must contain at least one valid key. Plugins without a matching signature will be rejected during the build phase.
+</Warning>
+
+## Rate Limits
+
+Sliding-window rate limiting applied per session.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_sessions` | int | `0` | Maximum concurrent sessions (0 = unlimited). |
+| `messages_per_min` | int | `0` | Maximum messages per minute per session (0 = unlimited). |
+| `tool_calls_per_min` | int | `0` | Maximum tool calls per minute per session (0 = unlimited). |
+| `tokens_per_hour` | int | `0` | Maximum tokens per hour per session (0 = unlimited). |
+
+```yaml
+security:
+  rate_limits:
+    max_sessions: 10
+    messages_per_min: 30
+    tool_calls_per_min: 60
+    tokens_per_hour: 100000
+```
+
+<Note>
+A value of `0` means unlimited. Rate limits use a sliding window algorithm, so burst traffic is smoothed over the window period.
+</Note>
+
+## Sandbox
+
+Docker-based sandbox for tool execution.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable sandboxed tool execution. |
+| `scopes_requiring_sandbox` | list | — | Tool scopes that must run inside a sandbox (e.g., `["exec", "read_write"]`). |
+| `image` | string | — | Docker image to use for sandbox containers. |
+| `cpu_shares` | int | `0` | CPU shares for the container (0 = Docker default). |
+| `memory_mb` | int | `0` | Memory limit in MB (0 = unlimited). |
+| `disk_mb` | int | `0` | Disk limit in MB (0 = unlimited). |
+
+```yaml
+security:
+  sandbox:
+    enabled: true
+    scopes_requiring_sandbox: ["exec", "read_write"]
+    image: "sclaw-sandbox:latest"
+    memory_mb: 512
+    disk_mb: 1024
+```
+
+<Warning>
+When `enabled` is `true` but Docker is unavailable, sandboxed tool executions will fail (fail-closed design). Ensure Docker is running before enabling this feature.
+</Warning>
+
+## URL Filter
+
+Default-deny domain filtering for network tools.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `allow_domains` | list | — | Domains permitted for outbound requests. |
+| `deny_domains` | list | — | Domains explicitly blocked (evaluated after allow list). |
+
+```yaml
+security:
+  url_filter:
+    allow_domains: ["api.openai.com", "api.anthropic.com"]
+    deny_domains: ["evil.example.com"]
+```
+
+<Warning>
+When `allow_domains` is empty, **all outbound URLs are blocked**. This is a default-deny design — you must explicitly allow domains for network tools to function.
+</Warning>
+
+## Complete Example
+
+```yaml
+security:
+  plugins:
+    require_certified: true
+    trusted_keys:
+      - "a1b2c3d4e5f6..."
+
+  rate_limits:
+    max_sessions: 10
+    messages_per_min: 30
+    tool_calls_per_min: 60
+    tokens_per_hour: 100000
+
+  sandbox:
+    enabled: true
+    scopes_requiring_sandbox: ["exec", "read_write"]
+    image: "sclaw-sandbox:latest"
+    memory_mb: 512
+    disk_mb: 1024
+
+  url_filter:
+    allow_domains: ["api.openai.com", "api.anthropic.com"]
+    deny_domains: ["evil.example.com"]
+```

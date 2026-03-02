@@ -1,0 +1,140 @@
+---
+title: Sandboxing & Isolation
+description: "Docker sandbox, environment sanitization, and URL filtering"
+icon: "box"
+---
+
+sclaw provides multiple isolation mechanisms to contain the impact of tool execution and prevent unauthorized access to system resources.
+
+## Docker Sandbox
+
+Tools with `exec` or `read_write` scopes can be sandboxed in Docker containers with resource limits.
+
+### Configuration
+
+```yaml
+security:
+  sandbox:
+    enabled: true
+    scopes_requiring_sandbox: ["exec", "read_write"]
+    image: "sclaw-sandbox:latest"
+    cpu_shares: 512
+    memory_mb: 512
+    disk_mb: 1024
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable sandboxed tool execution. |
+| `scopes_requiring_sandbox` | list | — | Tool scopes that must run inside a sandbox. |
+| `image` | string | — | Docker image for sandbox containers. |
+| `cpu_shares` | int | `0` | CPU shares (0 = Docker default). |
+| `memory_mb` | int | `0` | Memory limit in MB (0 = unlimited). |
+| `disk_mb` | int | `0` | Disk limit in MB (0 = unlimited). |
+
+### How It Works
+
+When a tool with a sandboxed scope is executed:
+
+1. A new Docker container is created from the configured image
+2. Resource limits (CPU, memory, disk) are applied
+3. The tool's working directory is mounted as a volume
+4. The tool command executes inside the container
+5. Output is captured and returned to the agent
+6. The container is destroyed
+
+<Warning>
+The sandbox is **fail-closed** — if Docker is unavailable or the container fails to start, the tool execution returns an error. It never falls back to unsandboxed execution.
+</Warning>
+
+## Environment Sanitization
+
+### SanitizedEnv
+
+Every subprocess spawned by sclaw receives a sanitized environment. `SanitizedEnv()` filters `os.Environ()` to remove known sensitive variables:
+
+- Variables matching `*_API_KEY`, `*_TOKEN`, `*_SECRET`, `*_PASSWORD`
+- AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`)
+- GCP credentials (`GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_PROJECT`)
+- Azure credentials (`AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`)
+- Common tool secrets (`GITHUB_TOKEN`, `SLACK_TOKEN`, `NPM_TOKEN`)
+
+```go
+// Always use SanitizedEnv, never os.Environ()
+cmd.Env = security.SanitizedEnv()
+```
+
+### Path Validation
+
+`ValidatePath` blocks access to sensitive filesystem paths:
+
+```go
+if err := security.ValidatePath(requestedPath); err != nil {
+    return err // blocks /proc, /sys, etc.
+}
+```
+
+This prevents tools from reading sensitive system information like process memory maps, kernel parameters, or other system files.
+
+## URL Filtering
+
+Network tools are subject to domain-based URL filtering with a **default-deny** policy.
+
+### Configuration
+
+```yaml
+security:
+  url_filter:
+    allow_domains: ["api.openai.com", "api.github.com"]
+    deny_domains: ["evil.example.com"]
+```
+
+### Evaluation Order
+
+1. Check if the domain is in `deny_domains` — if yes, **block**
+2. Check if the domain is in `allow_domains` — if yes, **allow**
+3. If `allow_domains` is non-empty and domain is not listed — **block** (default-deny)
+4. If `allow_domains` is empty — **block everything** (maximum security)
+
+<Warning>
+An empty `allow_domains` list blocks **all** outbound URLs. You must explicitly list every domain that network tools are allowed to contact.
+</Warning>
+
+## Session Isolation
+
+### Lane Locks
+
+Lane locks serialize message processing per session, preventing race conditions:
+
+- Each session has its own lock
+- Messages for the same session are processed sequentially
+- Messages for different sessions run concurrently
+
+### Sub-Agent Isolation
+
+Sub-agents (ephemeral agent sessions for subtasks) have strict isolation:
+
+- Own conversation history (separate from parent)
+- `ParentID` validation prevents unauthorized cross-session access
+- Automatic cleanup after completion
+- Cannot directly access the parent session's state
+
+## Tool Scope System
+
+Tools declare their required scopes at registration:
+
+| Scope | Description | Sandbox? |
+|-------|-------------|----------|
+| `read_only` | Read files, query data | Optional |
+| `read_write` | Create, modify, delete files | Recommended |
+| `exec` | Execute commands/code | Recommended |
+| `network` | Make outbound requests | URL filtered |
+
+The security system uses scopes to:
+- Enforce sandbox requirements (`scopes_requiring_sandbox`)
+- Apply URL filtering (network scope)
+- Determine approval policies
+
+<Tip>
+For maximum security, sandbox both `exec` and `read_write` scopes, enable URL filtering with an explicit allow list, and set rate limits to prevent abuse.
+</Tip>

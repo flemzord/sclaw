@@ -1,0 +1,143 @@
+---
+title: Development Setup
+description: "Set up your development environment for contributing to sclaw"
+icon: "terminal"
+---
+
+sclaw uses Nix with direnv for a reproducible development environment. This guide walks you through getting everything set up.
+
+## Quick Start
+
+<Steps>
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/flemzord/sclaw.git
+cd sclaw
+```
+
+### Enable direnv
+
+```bash
+direnv allow
+```
+
+This loads `shell.nix` automatically, providing:
+- Go (latest stable)
+- golangci-lint
+- goreleaser
+- Convenience shell commands
+
+### Verify Setup
+
+```bash
+go version
+golangci-lint version
+```
+
+</Steps>
+
+## Available Commands
+
+The Nix shell provides convenience commands:
+
+| Command | Description |
+|---------|-------------|
+| `lint` | Run golangci-lint with project configuration |
+| `run-tests` | Run tests with race detector and coverage |
+
+```bash
+# Lint the codebase
+lint
+
+# Run all tests
+run-tests
+```
+
+## Manual Setup
+
+If you prefer not to use Nix, install the prerequisites manually:
+
+### Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Go | 1.23+ | Build and test |
+| golangci-lint | latest | Linting |
+| goreleaser | v2 | Release builds (optional) |
+
+### Building
+
+```bash
+go build -o sclaw ./cmd/sclaw/
+```
+
+### Testing
+
+```bash
+go test -race -cover ./...
+```
+
+### Linting
+
+```bash
+golangci-lint run
+```
+
+<Note>
+The project uses `.golangci.yml` (v2 format) for lint configuration. This includes gofumpt formatting enforcement, revive rules, and other quality checks.
+</Note>
+
+## Project Structure
+
+```
+sclaw/
+├── cmd/
+│   ├── sclaw/          # Main CLI entry point
+│   └── xsclaw/         # Custom build tooling
+├── internal/           # Private packages
+│   ├── agent/          # ReAct reasoning loop
+│   ├── bootstrap/      # Plugin hot-reload
+│   ├── cert/           # Plugin certificate signing
+│   ├── channel/        # Platform adapters
+│   ├── config/         # Configuration loading
+│   ├── context/        # LLM context management
+│   ├── core/           # Module system and registry
+│   ├── cron/           # Scheduled tasks
+│   ├── gateway/        # HTTP server
+│   ├── hook/           # Message pipeline hooks
+│   ├── memory/         # Conversation history
+│   ├── multiagent/     # Multi-agent routing
+│   ├── provider/       # LLM provider interface
+│   ├── reload/         # Hot config reload
+│   ├── router/         # Message dispatch
+│   ├── security/       # Security hardening
+│   ├── subagent/       # Sub-agent sessions
+│   ├── tool/           # Tool registry
+│   └── workspace/      # Working directory
+├── modules/            # Module implementations
+│   ├── channel/
+│   │   └── telegram/
+│   ├── memory/
+│   │   └── sqlite/
+│   └── provider/
+│       └── openai_compatible/
+├── pkg/                # Public packages
+│   ├── app/            # Shared entry point
+│   └── message/        # Message model
+└── docs/               # Documentation
+```
+
+## CI/CD
+
+GitHub Actions runs on every push and PR to `main`:
+
+1. **Lint** — golangci-lint with project configuration
+2. **Test** — Full test suite with race detector and coverage
+
+GoReleaser handles multi-platform release builds (linux/darwin, amd64/arm64).
+
+<Tip>
+Run `lint` and `run-tests` locally before pushing to catch issues before CI.
+</Tip>

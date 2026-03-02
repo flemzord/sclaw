@@ -1,0 +1,108 @@
+---
+title: Module Configuration
+description: "Configure channels, providers, and memory backends"
+icon: "puzzle-piece"
+---
+
+Modules are identified by their registration ID, which follows the pattern `<category>.<name>` (e.g., `channel.telegram`, `provider.openai_compatible`, `memory.sqlite`). Each key under `modules` must match a compiled module ID; unknown IDs cause a validation error.
+
+## channel.telegram
+
+Connects sclaw to Telegram as a messaging channel.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `token` | string | — | Bot token in `<bot_id>:<hash>` format. **Required.** |
+| `mode` | string | `"polling"` | Delivery mode: `"polling"` or `"webhook"`. |
+| `polling_timeout` | int | `30` | Long-polling timeout in seconds (0–50). |
+| `webhook_url` | string | — | Public URL for webhook mode. |
+| `webhook_secret` | string | — | Secret token for webhook verification. |
+| `allowed_updates` | list | `["message", "edited_message", "channel_post"]` | Telegram update types to receive. |
+| `allow_users` | list | — | Telegram user IDs allowed to interact. Empty = all. |
+| `allow_groups` | list | — | Telegram group IDs allowed. Empty = all. |
+| `max_message_length` | int | `4096` | Maximum outbound message length (1–4096). |
+| `stream_flush_interval` | duration | `1s` | Interval between streaming message edits (100ms–30s). |
+| `api_url` | string | `"https://api.telegram.org"` | Telegram Bot API base URL. |
+
+<Tabs>
+  <Tab title="Polling (simple)">
+    ```yaml
+    modules:
+      channel.telegram:
+        token: "${TELEGRAM_BOT_TOKEN}"
+        mode: "polling"
+        allow_users: ["123456789"]
+    ```
+  </Tab>
+  <Tab title="Webhook (production)">
+    ```yaml
+    modules:
+      channel.telegram:
+        token: "${TELEGRAM_BOT_TOKEN}"
+        mode: "webhook"
+        webhook_url: "https://bot.example.com/webhook"
+        webhook_secret: "${WEBHOOK_SECRET}"
+    ```
+  </Tab>
+</Tabs>
+
+## provider.openai_compatible
+
+Connects to any OpenAI-compatible API (OpenAI, Azure OpenAI, Anthropic via proxy, local models, etc.).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `base_url` | string | — | API base URL (must be http or https). **Required.** |
+| `api_key` | string | — | API key. One of `api_key` or `api_key_env` is **required**. |
+| `api_key_env` | string | — | Environment variable name containing the API key. |
+| `model` | string | — | Model identifier (e.g., `"gpt-4o"`). **Required.** |
+| `context_window` | int | `4096` | Maximum context window size in tokens. |
+| `max_tokens` | int | `0` | Maximum tokens to generate (0 = provider default). |
+| `headers` | map | — | Extra HTTP headers sent with every request. |
+| `timeout` | duration | `30s` | HTTP request timeout. |
+
+```yaml
+modules:
+  provider.openai_compatible:
+    base_url: "https://api.openai.com/v1"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000
+    timeout: 30s
+```
+
+<Tip>
+Use `api_key_env` instead of `api_key` if you prefer to reference the environment variable by name rather than expanding it inline. This can be useful when the same config is shared across environments.
+</Tip>
+
+## memory.sqlite
+
+Provides SQLite-backed persistent conversation history and long-term memory.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | string | `{DataDir}/memory.db` | Database file path. |
+| `wal` | bool | `true` | Enable WAL journal mode for concurrent reads. |
+| `busy_timeout` | int | `5000` | Milliseconds to wait on a busy lock. Must be non-negative. |
+
+<Tabs>
+  <Tab title="Default (zero config)">
+    ```yaml
+    modules:
+      memory.sqlite: {}
+    ```
+  </Tab>
+  <Tab title="Custom path">
+    ```yaml
+    modules:
+      memory.sqlite:
+        path: "/var/lib/sclaw/memory.db"
+        wal: true
+        busy_timeout: 10000
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The SQLite module uses `modernc.org/sqlite` (pure Go, no CGO required). WAL mode enables concurrent reads while maintaining write serialization.
+</Note>

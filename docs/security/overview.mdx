@@ -1,0 +1,94 @@
+---
+title: Security Overview
+description: "Defense-in-depth security across the entire message pipeline"
+icon: "shield"
+---
+
+sclaw implements defense-in-depth security — multiple independent layers that protect against credential leakage, prompt injection, resource abuse, and unauthorized access. No single layer is a complete solution; together they form a robust security posture.
+
+## Security Layers
+
+| Layer | Mechanism | Description |
+|-------|-----------|-------------|
+| **Credential Management** | `CredentialStore` | Secrets stored via context injection — never in LLM prompts. |
+| **Log Redaction** | `RedactingHandler` | Wraps `slog.Handler`, redacts all string attributes. |
+| **Pattern Detection** | `Redactor` | Compiled regex for OpenAI, Anthropic, GitHub, AWS, Slack keys. |
+| **Rate Limiting** | `RateLimiter` | Sliding window counters for sessions, messages, tool calls, tokens. |
+| **Input Validation** | `ValidateMessageSize` | Message size limits + JSON depth checking at system boundaries. |
+| **Subprocess Sanitization** | `SanitizedEnv` | Strips sensitive env vars before `syscall.Exec`. |
+| **Tool Sandboxing** | Docker sandbox | Resource-limited containers for `exec`/`read_write` scopes. |
+| **URL Filtering** | `URLFilter` | Default-deny domain allow/deny lists for network tools. |
+| **Audit Logging** | `AuditLogger` | JSONL audit trail: messages, tool calls, auth, config changes. |
+| **Session Isolation** | Lane locks | Cross-session `ParentID` validation for sub-agents. |
+| **Auth Middleware** | Bearer + Basic | Constant-time comparison for API authentication. |
+| **Webhook Validation** | HMAC-SHA256 | Signature verification per webhook source. |
+| **Plugin Certification** | Ed25519 | Signature verification with trusted key list. |
+| **Path Validation** | `ValidatePath` | Blocks access to sensitive paths like `/proc`. |
+
+## Design Principles
+
+### Never Pass Secrets to LLM Context
+
+Secrets are managed exclusively through `CredentialStore` and accessed via `context.Context`. They are never embedded in system prompts, user messages, or tool outputs that flow through the LLM.
+
+### Defense in Depth
+
+Multiple layers protect against credential leakage:
+
+1. **CredentialStore** — Secrets never reach the LLM
+2. **Redactor** — Pattern-based detection catches known key formats
+3. **RedactingHandler** — Catches any remaining leaks in logs
+4. **SanitizedEnv** — Subprocess environment sanitization
+5. **AuditLogger** — Full audit trail with redaction
+
+### Fail-Closed
+
+- Empty URL allow-lists block **all** domains (default-deny)
+- Sandbox executor returns error if Docker is unavailable
+- Rate limiter rejects requests when limits are exceeded
+- Message validation rejects oversized or deeply nested payloads
+
+### Minimal Privilege
+
+- Tools declare required scopes at registration
+- Policy system controls execution based on context
+- Subprocess environments stripped of sensitive variables
+- Sandbox containers run with resource limits
+
+## Audit Events
+
+The audit logger covers these event types:
+
+| Event | Description |
+|-------|-------------|
+| `message` | Inbound/outbound message processed |
+| `tool_call` | Tool invocation with arguments |
+| `tool_result` | Tool execution result |
+| `approval` | Tool approval request/response |
+| `auth_success` | Successful authentication |
+| `auth_failure` | Failed authentication attempt |
+| `config_change` | Configuration reload |
+| `session_create` | New session created |
+| `session_delete` | Session terminated |
+| `rate_limit` | Rate limit exceeded |
+
+<Note>
+Audit logs are written in JSONL format for easy ingestion by log aggregation systems (ELK, Loki, Splunk, etc.).
+</Note>
+
+## Quick Links
+
+<CardGroup cols={2}>
+  <Card title="Credential Management" icon="key" href="/security/credentials">
+    How sclaw handles secrets and prevents leakage.
+  </Card>
+  <Card title="Prompt Injection" icon="shield-exclamation" href="/security/prompt-injection">
+    Threat model and mitigations for prompt injection attacks.
+  </Card>
+  <Card title="Sandboxing" icon="box" href="/security/sandboxing">
+    Docker-based isolation for tool execution.
+  </Card>
+  <Card title="Security Config" icon="gear" href="/configuration/security">
+    Configure rate limits, sandbox, and URL filtering.
+  </Card>
+</CardGroup>

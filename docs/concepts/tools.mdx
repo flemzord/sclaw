@@ -1,0 +1,84 @@
+---
+title: Tools
+description: "Tool registry, scopes, and the approval system"
+icon: "wrench"
+---
+
+Tools are capabilities that agents can invoke during the ReAct loop. Each tool is a Go interface implementation that declares its name, description, JSON schema, required scopes, and default approval policy.
+
+## Tool Interface
+
+Every tool implements:
+
+| Method | Description |
+|--------|-------------|
+| `Name()` | Unique identifier (e.g., `"exec"`, `"read_file"`). |
+| `Description()` | Human-readable description for the LLM. |
+| `Schema()` | JSON Schema defining the tool's input parameters. |
+| `Scopes()` | Required permission scopes. |
+| `DefaultPolicy()` | Default approval level (`allow`, `ask`, `deny`). |
+| `Execute(ctx, args, env)` | Runs the tool and returns output. |
+
+## Scopes
+
+Scopes classify what a tool can do:
+
+| Scope | Description |
+|-------|-------------|
+| `read_only` | Read files, query databases, inspect state. |
+| `read_write` | Create, modify, or delete files and data. |
+| `exec` | Execute arbitrary commands or code. |
+| `network` | Make outbound network requests. |
+
+Scopes are declared at registration time and used by the security system to enforce sandboxing and URL filtering policies.
+
+## Approval System
+
+The approval system controls whether tool calls execute automatically or require user confirmation:
+
+| Level | Behavior |
+|-------|----------|
+| `allow` | Execute immediately without asking. |
+| `ask` | Prompt the user for approval before executing. |
+| `deny` | Always block execution. |
+
+When a tool requires approval (`ask` policy), the pipeline:
+
+1. Sends an approval request to the user via the channel
+2. Waits for a response (with configurable timeout)
+3. Executes or rejects based on the user's decision
+
+<Note>
+The approval manager uses a channel-based requester pattern — it sends the approval prompt through the same messaging channel (Telegram, Discord, etc.) that the user is interacting with.
+</Note>
+
+## Execution Environment
+
+Each tool execution receives an `ExecutionEnv` with:
+
+| Field | Description |
+|-------|-------------|
+| `Workspace` | Working directory for file operations. |
+| `DataDir` | Agent's persistent data directory. |
+| `SanitizedEnv` | Environment variables with secrets stripped. |
+| `URLFilter` | Domain allow/deny list for network requests. |
+| `ApprovalRequester` | Interface to request user approval if needed. |
+
+<Warning>
+Tools always receive `SanitizedEnv` — never the raw `os.Environ()`. Sensitive environment variables (API keys, tokens) are automatically stripped to prevent accidental leakage.
+</Warning>
+
+## Sandboxing
+
+Tools with `exec` or `read_write` scopes can be sandboxed in Docker containers:
+
+```yaml
+security:
+  sandbox:
+    enabled: true
+    scopes_requiring_sandbox: ["exec", "read_write"]
+    image: "sclaw-sandbox:latest"
+    memory_mb: 512
+```
+
+See [Sandboxing](/security/sandboxing) for details.

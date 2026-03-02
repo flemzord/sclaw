@@ -1,0 +1,203 @@
+---
+title: Code Conventions
+description: "Go coding standards and conventions for the sclaw project"
+icon: "book"
+---
+
+This page documents the coding conventions and standards used in the sclaw project. Following these ensures consistency and helps avoid common pitfalls.
+
+## General
+
+- **Language**: Code, comments, variable names, and docs in English
+- **Formatting**: gofumpt (enforced by golangci-lint)
+- **Project layout**: Standard Go layout (`cmd/`, `internal/`, `pkg/`)
+- **Commits**: Conventional Commits format
+
+### Commit Format
+
+```
+<type>(<scope>): <description>
+
+feat:     New feature
+fix:      Bug fix
+chore:    Maintenance
+ci:       CI/CD changes
+docs:     Documentation
+refactor: Code restructuring
+test:     Test additions/changes
+```
+
+## Function Design
+
+### Request Structs for 4+ Parameters
+
+When a function takes more than 3 parameters (excluding `ctx`), group them into a request struct:
+
+```go
+// Bad
+func CreateAgent(ctx context.Context, name, provider, workspace string, tools []string, memory bool) error
+
+// Good
+type CreateAgentRequest struct {
+    Name      string
+    Provider  string
+    Workspace string
+    Tools     []string
+    Memory    bool
+}
+func CreateAgent(ctx context.Context, req CreateAgentRequest) error
+```
+
+### Return Errors, Never Panic
+
+Always return `error` for conditions that depend on caller input. Reserve `panic` only for true programming errors:
+
+```go
+// Bad — user config should never cause a panic
+func LoadConfig(path string) Config {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        panic(err)
+    }
+}
+
+// Good
+func LoadConfig(path string) (Config, error) {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return Config{}, fmt.Errorf("load config: %w", err)
+    }
+}
+```
+
+## Data & Performance
+
+### O(1) Lookups
+
+Normalize data at the source so resolution functions use direct map lookups:
+
+```go
+// Normalize during validation
+for key, val := range config {
+    normalized[strings.TrimSpace(key)] = val
+}
+
+// O(1) lookup at runtime
+result := normalized[name]
+```
+
+### Nil Slices Over Empty Slices
+
+```go
+// Good — idiomatic Go
+var candidates []string
+
+// Avoid
+candidates := []string{}
+```
+
+### Bound Append-Only Collections
+
+Any in-memory append-only collection must have a cap or eviction strategy:
+
+```go
+// Bad — unbounded growth
+history = append(history, msg)
+
+// Good — bounded with trim
+history = append(history, msg)
+if len(history) > maxHistoryLen {
+    history = history[len(history)-maxHistoryLen:]
+}
+```
+
+## Concurrency
+
+### Encapsulate Channels Behind Methods
+
+Never export raw channels. Expose a method with state validation:
+
+```go
+// Bad
+type Approver struct {
+    ResponseCh chan bool
+}
+
+// Good
+type Approver struct {
+    responseCh chan bool
+    pending    bool
+}
+
+func (a *Approver) Respond(approved bool) error {
+    if !a.pending {
+        return errors.New("no pending approval")
+    }
+    a.responseCh <- approved
+    return nil
+}
+```
+
+### Lock Before Sharing Pointers
+
+Never pass a pointer to shared mutable state before acquiring its lock:
+
+```go
+// Bad — session pointer shared before lock
+go processSession(session)
+mu.Lock()
+
+// Good — lock first, then share
+mu.Lock()
+go processSession(session)
+```
+
+## Code Quality
+
+### Use Modern Go Idioms
+
+```go
+// Prefer
+slices.Sort(items)
+slices.Contains(items, target)
+os.LookupEnv("VAR")
+
+// Over
+sort.Strings(items)
+inList(items, target)  // custom helper
+os.Getenv("VAR")
+```
+
+### Never Reimplement stdlib
+
+Use `strings.TrimSpace`, `strings.Contains`, `strings.Split` over custom equivalents.
+
+### DRY — Extract Duplicated Logic
+
+When the same block of code (5+ lines) appears in multiple branches, extract it into a private method.
+
+### UTF-8 Safety
+
+When splitting strings by byte index, walk back to a valid UTF-8 rune boundary:
+
+```go
+if !utf8.RuneStart(data[splitIdx]) {
+    for splitIdx > 0 && !utf8.RuneStart(data[splitIdx]) {
+        splitIdx--
+    }
+}
+```
+
+## Security Rules
+
+- **Never pass secrets to LLM context** — Use `CredentialStore` via `context.Context`
+- **Redact before logging** — All logging through `RedactingHandler`
+- **Sanitize subprocess environment** — Always `security.SanitizedEnv()`, never `os.Environ()`
+- **Default-deny for external access** — Empty allow-lists block everything
+- **Validate at system boundaries** — Check message size and JSON depth on ingress
+
+## Testing Rules
+
+- **Never export test helpers in production packages** — Use `_test` build tags or `*test/` sub-packages
+- **Clean up provisioned resources** — Test teardown must not leak goroutines, connections, or files
+- **Consecutive error circuit breaker** — Background loops should stop after N consecutive errors

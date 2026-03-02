@@ -1,0 +1,139 @@
+---
+title: Memory System
+description: "Two-tier memory for conversation history and long-term knowledge"
+icon: "brain-circuit"
+---
+
+sclaw provides a two-tier memory system that gives agents both short-term and long-term recall:
+
+1. **History Store** — Conversation turns (user/assistant messages) persisted per session, restored when a session is recreated.
+2. **Fact Store** — Long-term knowledge extracted from conversations using an LLM, searchable via full-text search.
+
+Both tiers are defined as Go interfaces in `internal/memory/`. The default production backend is SQLite. Memory is optional — when disabled, the system degrades gracefully with no errors.
+
+## History Store
+
+`HistoryStore` manages per-session conversation history. Each message is stored with its role, content, tool calls, and metadata. Sessions are identified by a **persistence key** derived from the `channel:chatID:threadID` triple, which survives session UUID rotation.
+
+### Interface
+
+| Method | Description |
+|--------|-------------|
+| `Append` | Adds a message to the session's history. |
+| `GetRecent` | Returns the N most recent messages. |
+| `GetAll` | Returns all messages for a session. |
+| `SetSummary` | Stores a compaction summary, replacing any previous one. |
+| `GetSummary` | Returns the stored summary (empty if none). |
+| `Purge` | Removes all history and summary for a session. |
+| `Len` | Returns the number of stored messages. |
+
+### Compaction
+
+When a session's history exceeds a configurable threshold, the context engine triggers compaction:
+
+<Steps>
+
+### Summarize
+
+Older messages are summarized by an LLM into a single summary string.
+
+### Store
+
+The summary is stored via `SetSummary` and prepended as a system message on the next assembly pass.
+
+### Trim
+
+Only the most recent messages (controlled by `RetainRecent`) are kept alongside the summary.
+
+</Steps>
+
+<Note>
+If no summarizer is available, old messages are simply dropped. An emergency compaction path (`EmergencyCompact`) exists as a last resort when the context window is critically exceeded.
+</Note>
+
+## Fact Store
+
+The Fact Store manages long-term knowledge — pieces of information extracted from conversations (user preferences, personal details, decisions, goals).
+
+### Fact Structure
+
+Each fact contains:
+- **Content** — The factual information (e.g., "User prefers dark mode")
+- **Source** — Session ID where the fact was extracted
+- **Tags** — Categorization labels
+- **Metadata** — Key-value pairs for structured queries
+
+### Extraction
+
+The `FactExtractor` analyzes user-assistant exchanges and extracts facts using an LLM:
+
+```
+Analyze the following exchange and extract important facts about the user.
+Return one fact per line. If there are no facts worth remembering, return "NONE".
+Only extract factual information (preferences, personal details, decisions, goals).
+```
+
+### Injection
+
+`InjectMemory` retrieves relevant facts from the store and formats them for inclusion in the system prompt:
+
+```markdown
+## Relevant Memory
+
+- User prefers dark mode
+- User's name is Alice
+- User works at Acme Corp
+```
+
+Facts are added in rank order until a token budget is reached — preventing memory from consuming too much of the context window.
+
+## SQLite Backend
+
+The production backend uses SQLite with the following features:
+
+| Feature | Description |
+|---------|-------------|
+| **WAL mode** | Concurrent reads (enabled by default). |
+| **FTS5** | Full-text search on fact content using BM25 ranking. |
+| **Schema migration** | Automatic version tracking and migration. |
+| **Pure Go** | Uses `modernc.org/sqlite` — no CGO required. |
+| **Busy timeout** | Configurable wait time for lock contention. |
+
+### Database Schema
+
+| Table | Purpose |
+|-------|---------|
+| `messages` | Conversation messages, keyed by `(session_id, seq)`. |
+| `summaries` | Compaction summaries, one per session. |
+| `facts` | Long-term memory facts with metadata (JSON). |
+| `facts_fts` | FTS5 virtual table indexing `facts.content`. |
+| `schema_version` | Tracks the current schema version. |
+
+### Per-Agent Databases
+
+In multi-agent mode, each agent gets its own SQLite database:
+
+```
+{data_dir}/agents/
+├── assistant/
+│   └── memory.db
+└── support/
+    └── memory.db
+```
+
+Databases are opened lazily on first access and cached for the process lifetime.
+
+## Pipeline Integration
+
+Memory integrates into the router's pipeline at several points:
+
+| Step | Action |
+|------|--------|
+| **7b** | Restore history from SQLite for new sessions. |
+| **8b** | Persist user message (write-behind, non-fatal). |
+| **9** | Inject memory facts into system prompt. |
+| **13b** | Persist assistant message (write-behind, non-fatal). |
+
+<Tip>
+Persistence is always **write-behind** and **non-fatal** — SQLite errors are logged but never block the pipeline. This ensures the agent always responds, even if persistence fails.
+</Tip>

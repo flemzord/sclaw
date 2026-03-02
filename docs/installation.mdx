@@ -1,0 +1,143 @@
+---
+title: Installation
+description: "Install sclaw from binary or build from source"
+icon: "download"
+---
+
+## Binary Installation
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/flemzord/sclaw/releases).
+
+<Tabs>
+  <Tab title="macOS (Apple Silicon)">
+    ```bash
+    curl -Lo sclaw https://github.com/flemzord/sclaw/releases/latest/download/sclaw_darwin_arm64
+    chmod +x sclaw
+    sudo mv sclaw /usr/local/bin/
+    ```
+  </Tab>
+  <Tab title="macOS (Intel)">
+    ```bash
+    curl -Lo sclaw https://github.com/flemzord/sclaw/releases/latest/download/sclaw_darwin_amd64
+    chmod +x sclaw
+    sudo mv sclaw /usr/local/bin/
+    ```
+  </Tab>
+  <Tab title="Linux (amd64)">
+    ```bash
+    curl -Lo sclaw https://github.com/flemzord/sclaw/releases/latest/download/sclaw_linux_amd64
+    chmod +x sclaw
+    sudo mv sclaw /usr/local/bin/
+    ```
+  </Tab>
+  <Tab title="Linux (arm64)">
+    ```bash
+    curl -Lo sclaw https://github.com/flemzord/sclaw/releases/latest/download/sclaw_linux_arm64
+    chmod +x sclaw
+    sudo mv sclaw /usr/local/bin/
+    ```
+  </Tab>
+</Tabs>
+
+Verify the installation:
+
+```bash
+sclaw version
+```
+
+## Build from Source
+
+<Steps>
+
+### Prerequisites
+
+- Go 1.23 or later
+- Git
+
+### Clone and Build
+
+```bash
+git clone https://github.com/flemzord/sclaw.git
+cd sclaw
+go build -o sclaw ./cmd/sclaw/
+```
+
+### Install
+
+```bash
+sudo mv sclaw /usr/local/bin/
+```
+
+</Steps>
+
+## Custom Builds with xsclaw
+
+sclaw uses a Caddy-inspired plugin system. The `xsclaw` tool compiles a custom binary with additional third-party modules:
+
+```bash
+# Install xsclaw
+go install github.com/flemzord/sclaw/cmd/xsclaw@latest
+
+# Build with plugins
+xsclaw build \
+  --with github.com/example/sclaw-weather@v1.2.0 \
+  --with github.com/example/sclaw-calendar@v0.9.1
+```
+
+Alternatively, declare plugins in your configuration file and let sclaw handle the rebuild automatically:
+
+```yaml
+plugins:
+  - module: "github.com/example/sclaw-weather"
+    version: "v1.2.0"
+  - module: "github.com/example/sclaw-calendar"
+    version: "v0.9.1"
+```
+
+<Note>
+When using configuration-declared plugins, sclaw detects plugin list changes on reload and triggers a rebuild + re-exec automatically. This requires `xsclaw` to be available in `$PATH`.
+</Note>
+
+## Development Setup
+
+For contributing to sclaw, we recommend using Nix with direnv:
+
+```bash
+git clone https://github.com/flemzord/sclaw.git
+cd sclaw
+direnv allow  # Loads shell.nix automatically
+```
+
+This provides Go, golangci-lint, goreleaser, and convenience commands:
+
+```bash
+lint       # Run golangci-lint
+run-tests  # Run tests with race detector + coverage
+```
+
+See the [Development Setup](/development/setup) guide for more details.
+
+## CLI Reference
+
+```bash
+# Start sclaw with a configuration file
+sclaw start --config /path/to/sclaw.yaml
+
+# Start with debug logging
+sclaw start --config sclaw.yaml --debug
+
+# Validate configuration without starting
+sclaw config check /path/to/sclaw.yaml
+
+# Print version and compiled modules
+sclaw version
+```
+
+<Info>
+sclaw automatically discovers configuration files in this order:
+1. `$XDG_CONFIG_HOME/sclaw/sclaw.yaml`
+2. `~/.config/sclaw/sclaw.yaml`
+3. `./sclaw.yaml`
+
+You can skip the `--config` flag if your file is in one of these locations.
+</Info>

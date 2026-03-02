@@ -1,0 +1,109 @@
+---
+title: Configuration Overview
+description: "Understanding sclaw's YAML configuration system"
+icon: "gear"
+---
+
+sclaw is entirely config-driven. A single YAML file declares which modules to load, how agents behave, and what security policies to enforce.
+
+## Configuration Discovery
+
+The configuration file is passed via the `--config` (`-c`) flag or discovered automatically:
+
+```bash
+# Explicit path
+sclaw start --config /etc/sclaw/sclaw.yaml
+
+# Automatic discovery (search order):
+#   1. $XDG_CONFIG_HOME/sclaw/sclaw.yaml
+#   2. ~/.config/sclaw/sclaw.yaml
+#   3. ./sclaw.yaml
+sclaw start
+```
+
+You can validate a configuration file without starting the application:
+
+```bash
+sclaw config check /path/to/sclaw.yaml
+```
+
+## Environment Variables
+
+All string values support environment variable expansion before parsing:
+
+| Syntax | Behavior |
+|--------|----------|
+| `${VAR}` | Replaced by the value of `VAR`. If unset, loading **fails with an error**. |
+| `${VAR:-default}` | Replaced by the value of `VAR`. If unset, `default` is used instead. |
+
+Variable names must match `[A-Za-z_][A-Za-z0-9_]*`.
+
+```yaml
+modules:
+  provider.openai_compatible:
+    api_key: "${OPENAI_API_KEY}"
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+```
+
+<Warning>
+Required variables (without defaults) cause a hard failure at startup if unset. This is intentional — it prevents running with missing credentials.
+</Warning>
+
+## Top-Level Structure
+
+The configuration file has five top-level keys:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | string | yes | Config format version. Currently only `"1"` is supported. |
+| `modules` | map | yes | Module configurations keyed by module ID. At least one module must be present. |
+| `agents` | map | no | Per-agent configurations keyed by agent name. Omit for single-agent mode. |
+| `plugins` | list | no | Third-party Go module plugins to compile into the binary. |
+| `security` | object | no | Security settings (rate limits, sandbox, URL filter, plugin certification). |
+
+```yaml
+version: "1"
+
+modules:
+  # Module configurations...
+
+agents:
+  # Agent configurations (optional)...
+
+plugins:
+  # Plugin declarations (optional)...
+
+security:
+  # Security settings (optional)...
+```
+
+## Validation
+
+sclaw performs thorough validation at startup:
+
+- **Version check** — Only `"1"` is accepted
+- **Module resolution** — Every key under `modules` must match a compiled module ID
+- **Agent validation** — Provider references must exist in `modules`, at most one `default` routing rule
+- **Type validation** — Duration fields, integer bounds, enum values are all checked
+- **Security validation** — Rate limit values must be non-negative, sandbox scopes must be valid
+
+<Tip>
+Run `sclaw config check` during CI to catch configuration errors before deployment.
+</Tip>
+
+## Live Reload
+
+sclaw supports live configuration reload without restart:
+
+- **SIGHUP signal** — Send `kill -HUP <pid>` to trigger a reload
+- **File watcher** — Modifications to the config file are detected automatically
+
+On reload, sclaw:
+
+1. Re-reads and re-validates the configuration file
+2. Hot-reloads modules that implement the `Reloader` interface
+3. If the plugin list changed (`xsclaw`-built binaries only), triggers a full rebuild and re-exec
+
+<Note>
+Not all changes can be hot-reloaded. Module additions/removals require a restart. Provider and channel configuration changes are typically hot-reloadable.
+</Note>

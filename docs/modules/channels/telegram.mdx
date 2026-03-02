@@ -1,0 +1,160 @@
+---
+title: Telegram Channel
+description: "Full-featured Telegram bot integration with polling, webhooks, and streaming"
+icon: "telegram"
+---
+
+The `channel.telegram` module connects sclaw to Telegram as a messaging channel. It supports long-polling and webhook delivery modes, streaming responses, typing indicators, and user/group access control.
+
+## Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `token` | string | — | Bot token in `<bot_id>:<hash>` format. **Required.** |
+| `mode` | string | `"polling"` | Delivery mode: `"polling"` or `"webhook"`. |
+| `polling_timeout` | int | `30` | Long-polling timeout in seconds (0–50). |
+| `webhook_url` | string | — | Public URL for webhook mode. |
+| `webhook_secret` | string | — | Secret token for webhook verification. |
+| `allowed_updates` | list | `["message", "edited_message", "channel_post"]` | Telegram update types to receive. |
+| `allow_users` | list | — | Telegram user IDs allowed to interact. Empty = all. |
+| `allow_groups` | list | — | Telegram group IDs allowed. Empty = all. |
+| `max_message_length` | int | `4096` | Maximum outbound message length (1–4096). |
+| `stream_flush_interval` | duration | `1s` | Interval between streaming message edits (100ms–30s). |
+| `api_url` | string | `"https://api.telegram.org"` | Telegram Bot API base URL. |
+
+## Delivery Modes
+
+<Tabs>
+  <Tab title="Polling">
+    Polling is the simplest setup — no public URL needed. sclaw connects to the Telegram API and waits for updates using long-polling.
+
+    ```yaml
+    modules:
+      channel.telegram:
+        token: "${TELEGRAM_BOT_TOKEN}"
+        mode: "polling"
+        polling_timeout: 30
+    ```
+
+    **Pros:**
+    - Zero infrastructure requirements
+    - Works behind NAT/firewalls
+    - Simple to set up
+
+    **Cons:**
+    - Slightly higher latency
+    - Only one instance can poll at a time
+  </Tab>
+  <Tab title="Webhook">
+    Webhook mode requires a publicly accessible HTTPS endpoint. Telegram pushes updates directly to your server for lower latency.
+
+    ```yaml
+    modules:
+      channel.telegram:
+        token: "${TELEGRAM_BOT_TOKEN}"
+        mode: "webhook"
+        webhook_url: "https://bot.example.com/webhook/telegram"
+        webhook_secret: "${WEBHOOK_SECRET}"
+    ```
+
+    **Pros:**
+    - Lower latency (push vs pull)
+    - Better for high-traffic bots
+
+    **Cons:**
+    - Requires public HTTPS endpoint
+    - More infrastructure to manage
+
+    <Warning>
+    Always set `webhook_secret` in production. sclaw verifies the `X-Telegram-Bot-Api-Secret-Token` header on incoming requests using this secret.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Streaming
+
+When the agent loop supports streaming, the Telegram channel edits the response message progressively as chunks arrive. The `stream_flush_interval` controls how frequently edits are sent to the Telegram API.
+
+```yaml
+modules:
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+    stream_flush_interval: "1s"  # Edit every 1 second
+```
+
+<Note>
+Telegram rate-limits message edits. Setting `stream_flush_interval` below 500ms may cause rate limit errors. The default of 1s is a safe choice for most use cases.
+</Note>
+
+## Typing Indicators
+
+sclaw automatically sends typing indicators ("typing...") while the agent is processing a message. This provides visual feedback in the Telegram chat that the bot is working on a response.
+
+Typing indicators are:
+- Started at Step 9b of the pipeline
+- Cancelled when the agent loop completes
+- Renewed automatically (Telegram typing status expires after ~5 seconds)
+
+## Access Control
+
+### User Allowlist
+
+Restrict which Telegram users can interact with the bot:
+
+```yaml
+modules:
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allow_users: ["123456789", "987654321"]
+```
+
+When `allow_users` is empty, all users are permitted.
+
+### Group Allowlist
+
+Restrict which Telegram groups the bot responds in:
+
+```yaml
+modules:
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+    allow_groups: ["-1001234567890"]
+```
+
+When `allow_groups` is empty, all groups are permitted.
+
+<Tip>
+To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot). For group IDs, add [@RawDataBot](https://t.me/RawDataBot) to the group temporarily.
+</Tip>
+
+## Message Formatting
+
+The Telegram channel supports Markdown formatting in outbound messages. Long messages are automatically chunked at `max_message_length` boundaries, respecting code block and formatting boundaries where possible.
+
+## Getting Your Bot Token
+
+<Steps>
+
+### Open BotFather
+
+Message [@BotFather](https://t.me/BotFather) on Telegram.
+
+### Create a New Bot
+
+Send `/newbot` and follow the prompts to choose a name and username.
+
+### Copy the Token
+
+BotFather will give you a token in the format `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`.
+
+### Configure sclaw
+
+Add the token to your configuration (use environment variables for security):
+
+```yaml
+modules:
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+```
+
+</Steps>

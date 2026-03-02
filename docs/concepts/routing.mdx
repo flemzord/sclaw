@@ -1,0 +1,135 @@
+---
+title: Routing & Sessions
+description: "Message routing, session management, and sub-agents"
+icon: "route"
+---
+
+The router is the central message dispatcher in sclaw. It receives inbound messages from channels, resolves sessions, matches agents, and runs the processing pipeline.
+
+## Session Management
+
+Sessions are the primary unit of state in sclaw. Each session tracks:
+
+- **Session ID** — Unique identifier (UUID)
+- **Agent ID** — Which agent handles this session
+- **History** — In-memory conversation history (LLM messages)
+- **Persistence Key** — `channel:chatID:threadID` triple for SQLite storage
+
+### Session Resolution
+
+Sessions are keyed by a `SessionKey` triple:
+
+```
+channel:chatID:threadID
+```
+
+When a message arrives:
+
+1. The router looks up an existing session for the key
+2. If none exists, a new session is created (subject to `max_sessions` rate limit)
+3. The session is associated with an agent based on routing rules
+
+### Session Limits
+
+When `max_sessions` is configured and the limit is reached, new messages receive an error response:
+
+```
+Too many active sessions. Please try again later.
+```
+
+## Agent Routing
+
+The router evaluates agents **in declaration order** and picks the first match:
+
+```yaml
+agents:
+  support:
+    routing:
+      channels: ["telegram"]
+      groups: ["group-123"]
+
+  coder:
+    routing:
+      users: ["user-456"]
+
+  main:
+    routing:
+      default: true
+```
+
+Matching priority:
+1. **Channel match** — Does the message come from a listed channel?
+2. **User match** — Does the sender's ID appear in the `users` list?
+3. **Group match** — Does the chat ID appear in the `groups` list?
+4. **Default** — Fallback when no other rule matches
+
+<Warning>
+At most one agent may be marked `default: true`. If no agent matches and there is no default, the message is dropped silently.
+</Warning>
+
+## Lane Locking
+
+Lane locks serialize message processing per session. This prevents race conditions when multiple messages arrive in rapid succession for the same session:
+
+- Acquired at Step 5 of the pipeline
+- Released at Step 15 (via `defer`)
+- Queued messages wait until the lock is available
+
+<Note>
+Lane locking ensures that history append, agent execution, and persistence happen atomically per session. Without it, concurrent messages could corrupt conversation history.
+</Note>
+
+## Group Policy
+
+Group policy controls which messages are processed in group chats:
+
+- **Direct Messages** — Always processed
+- **Group Messages** — Processed based on policy (e.g., mention-only, all messages)
+
+The `ShouldProcess` check runs at Step 4 of the pipeline, before any resource-intensive operations.
+
+## Sub-Agents
+
+Sub-agents are ephemeral agent sessions spawned by a parent agent to handle specialized subtasks:
+
+| Field | Description |
+|-------|-------------|
+| `ID` | Unique sub-agent identifier |
+| `ParentID` | Session ID of the spawning agent |
+| `SessionID` | Associated session |
+| `Status` | `running`, `completed`, `failed`, `timeout`, `killed` |
+| `SystemPrompt` | Custom system prompt for the subtask |
+| `History` | Sub-agent's own conversation history |
+| `Result` | Final output (available after completion) |
+
+Sub-agents:
+- Have their own isolated conversation history
+- Cannot access the parent's session directly (cross-session isolation)
+- Are validated via `ParentID` to prevent unauthorized access
+- Are cleaned up automatically after completion
+
+## Approval Flow
+
+When a tool requires user approval, the router manages the request/response cycle:
+
+<Steps>
+
+### Tool Request
+
+The agent loop encounters a tool with `ask` approval policy.
+
+### Approval Prompt
+
+The approval manager sends a prompt to the user via the channel.
+
+### User Response
+
+The user approves or denies the tool execution.
+
+### Resume
+
+The agent loop resumes with the tool result (or an error if denied).
+
+</Steps>
+
+The approval manager intercepts responses at Step 3 of the pipeline, before they enter the normal message flow.

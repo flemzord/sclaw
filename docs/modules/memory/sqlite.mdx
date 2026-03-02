@@ -1,0 +1,156 @@
+---
+title: SQLite Memory
+description: "Persistent conversation history and long-term facts with FTS5 search"
+icon: "database"
+---
+
+The `memory.sqlite` module provides SQLite-backed persistent storage for both conversation history (HistoryStore) and long-term knowledge (Fact Store). It uses `modernc.org/sqlite` — a pure Go implementation with no CGO dependency.
+
+## Configuration
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `path` | string | `{DataDir}/memory.db` | Database file path. |
+| `wal` | bool | `true` | Enable WAL journal mode for concurrent reads. |
+| `busy_timeout` | int | `5000` | Milliseconds to wait on a busy lock. Must be non-negative. |
+
+<Tabs>
+  <Tab title="Default (zero config)">
+    ```yaml
+    modules:
+      memory.sqlite: {}
+    ```
+    Uses all defaults: auto-generated path, WAL enabled, 5-second busy timeout.
+  </Tab>
+  <Tab title="Custom configuration">
+    ```yaml
+    modules:
+      memory.sqlite:
+        path: "/var/lib/sclaw/memory.db"
+        wal: true
+        busy_timeout: 10000
+    ```
+  </Tab>
+</Tabs>
+
+## Features
+
+### WAL Mode
+
+Write-Ahead Logging (WAL) enables concurrent readers while writes are serialized:
+
+- Readers never block writers
+- Writers never block readers
+- Single writer at a time (SQLite limitation)
+- Produces additional `memory.db-wal` and `memory.db-shm` files
+
+<Note>
+WAL mode is enabled by default and recommended for all deployments. Disable only if you have specific requirements for rollback journal mode.
+</Note>
+
+### FTS5 Full-Text Search
+
+The Fact Store uses SQLite's FTS5 extension for efficient text search:
+
+- **BM25 ranking** — Results are ranked by relevance
+- **Automatic index sync** — Triggers keep the FTS5 index in sync with the facts table
+- **Efficient queries** — FTS5 uses an inverted index for sub-millisecond lookups
+
+### Schema Migration
+
+The module automatically manages its database schema:
+
+1. On first provisioning, the full schema is created
+2. The `schema_version` table tracks the current version
+3. Future updates apply incremental migrations
+
+## Database Schema
+
+| Table | Purpose |
+|-------|---------|
+| `messages` | Conversation messages, keyed by `(session_id, seq)` |
+| `summaries` | Compaction summaries, one per session |
+| `facts` | Long-term memory facts with metadata (JSON) |
+| `facts_fts` | FTS5 virtual table indexing `facts.content` |
+| `schema_version` | Tracks the current schema version for migrations |
+
+Three triggers (`facts_ai`, `facts_ad`, `facts_au`) keep the FTS5 index in sync on insert, delete, and update.
+
+## Per-Agent Databases
+
+In multi-agent mode, each agent gets its own SQLite database for conversation history:
+
+```
+{data_dir}/agents/
+├── assistant/
+│   └── memory.db
+├── support/
+│   └── memory.db
+└── coder/
+    └── memory.db
+```
+
+### Lazy Initialization
+
+Databases are opened lazily — only when the agent first receives a message:
+
+1. `ResolveHistory(agentID)` checks if a store exists for this agent
+2. If not, opens `{data_dir}/memory.db` via `sqlite.OpenHistoryStore`
+3. The store is cached for subsequent calls (double-checked locking)
+4. All databases are closed on shutdown
+
+<Tip>
+Lazy initialization means agents that never receive messages never open a database. This is efficient for multi-agent setups where some agents may be rarely used.
+</Tip>
+
+## Pipeline Integration
+
+The SQLite memory module integrates into the router's pipeline at multiple steps:
+
+| Step | Action | Fatal? |
+|------|--------|--------|
+| **7b** | Restore history from SQLite for new sessions | No |
+| **8b** | Persist user message to SQLite | No |
+| **13b** | Persist assistant message to SQLite | No |
+
+All persistence operations are **write-behind** and **non-fatal**:
+- Errors are logged as warnings
+- The pipeline continues normally
+- The agent always responds, even if persistence fails
+
+## Provisioning
+
+When the module is loaded, it:
+
+<Steps>
+
+### Create Data Directory
+
+Creates the data directory if it doesn't exist.
+
+### Open Database
+
+Opens the SQLite database with `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout`.
+
+### Run Migrations
+
+Executes the schema migration to create or update tables.
+
+### Register Services
+
+Registers two services:
+- `memory.history` — HistoryStore implementation
+- `memory.store` — Fact Store implementation
+
+</Steps>
+
+## Standalone Usage
+
+For per-agent history without the full module lifecycle:
+
+```go
+store, db, err := sqlite.OpenHistoryStore("/path/to/memory.db")
+defer db.Close()
+```
+
+This is used internally by `multiagent.Factory` for lazy per-agent database management.

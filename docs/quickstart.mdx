@@ -1,0 +1,132 @@
+---
+title: Quickstart
+description: "Get sclaw running in 5 minutes"
+icon: "rocket"
+---
+
+This guide walks you through setting up a sclaw instance with a Telegram bot connected to an OpenAI-compatible provider. By the end, you'll have a working AI assistant responding to your Telegram messages.
+
+## Prerequisites
+
+- A Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
+- An OpenAI API key (or any OpenAI-compatible API)
+- The `sclaw` binary ([installation guide](/installation))
+
+<Steps>
+
+### Create a Telegram Bot
+
+Open Telegram and message [@BotFather](https://t.me/BotFather):
+
+1. Send `/newbot`
+2. Choose a name and username for your bot
+3. Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+<Tip>
+To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot). You'll need this to restrict access to your bot.
+</Tip>
+
+### Create the Configuration File
+
+Create `sclaw.yaml` in your working directory:
+
+```yaml sclaw.yaml
+version: "1"
+
+modules:
+  memory.sqlite: {}
+
+  channel.telegram:
+    token: "${TELEGRAM_BOT_TOKEN}"
+    mode: "polling"
+    allow_users: ["${TELEGRAM_USER_ID}"]
+
+  provider.openai_compatible:
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000
+    timeout: 30s
+
+agents:
+  main:
+    provider: "provider.openai_compatible"
+    memory:
+      enabled: true
+    routing:
+      channels: ["telegram"]
+      default: true
+    loop:
+      max_iterations: 10
+      timeout: "5m"
+```
+
+<Note>
+Environment variables are expanded before parsing. Use `${VAR}` for required variables and `${VAR:-default}` for optional ones with fallbacks.
+</Note>
+
+### Set Environment Variables
+
+Export the required environment variables:
+
+```bash
+export TELEGRAM_BOT_TOKEN="your-bot-token-here"
+export TELEGRAM_USER_ID="your-telegram-user-id"
+export OPENAI_API_KEY="your-openai-api-key"
+```
+
+### Start sclaw
+
+```bash
+sclaw start --config sclaw.yaml
+```
+
+You should see output like:
+
+```
+sclaw dev (commit: none, built: unknown)
+Compiled modules:
+  channel.telegram
+  provider.openai_compatible
+  memory.sqlite
+Configuration OK (3 modules)
+```
+
+### Send Your First Message
+
+Open your Telegram bot and send a message. sclaw will process it through the 15-step pipeline and respond using your configured provider.
+
+</Steps>
+
+## Validate Your Configuration
+
+You can check your configuration without starting sclaw:
+
+```bash
+sclaw config check sclaw.yaml
+```
+
+## Enable Debug Logging
+
+For troubleshooting, enable debug mode:
+
+```bash
+sclaw start --config sclaw.yaml --debug
+```
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Configuration Deep Dive" icon="gear" href="/configuration/overview">
+    Learn about all configuration options.
+  </Card>
+  <Card title="Agent Personality" icon="user" href="/concepts/soul">
+    Customize your agent's personality with SOUL.md.
+  </Card>
+  <Card title="Multi-Agent Setup" icon="users" href="/configuration/agents">
+    Run multiple agents with different roles.
+  </Card>
+  <Card title="Security Hardening" icon="shield" href="/configuration/security">
+    Add rate limits, sandboxing, and URL filtering.
+  </Card>
+</CardGroup>

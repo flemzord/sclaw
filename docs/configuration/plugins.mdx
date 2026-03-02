@@ -1,0 +1,101 @@
+---
+title: Plugin System
+description: "Extend sclaw with third-party modules via xsclaw"
+icon: "plug"
+---
+
+sclaw uses a Caddy-inspired plugin system where third-party Go modules are compiled directly into the binary. This gives you the performance of static linking with the flexibility of plugins.
+
+## How It Works
+
+1. **Declare plugins** in your configuration file or via `xsclaw` CLI flags
+2. **xsclaw** generates a custom `main.go` that imports your plugins alongside the built-in modules
+3. The resulting binary contains all modules — no runtime loading, no shared libraries
+
+## Configuration
+
+Each plugin entry identifies a Go module path and version:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `module` | string | yes | Go module path (e.g., `"github.com/example/sclaw-plugin"`). |
+| `version` | string | no | Go module version (e.g., `"v1.0.0"`). |
+
+```yaml
+plugins:
+  - module: "github.com/example/sclaw-weather"
+    version: "v1.2.0"
+  - module: "github.com/example/sclaw-calendar"
+    version: "v0.9.1"
+```
+
+## Building with xsclaw
+
+```bash
+# Install xsclaw
+go install github.com/flemzord/sclaw/cmd/xsclaw@latest
+
+# Build with plugins
+xsclaw build \
+  --with github.com/example/sclaw-weather@v1.2.0 \
+  --with github.com/example/sclaw-calendar@v0.9.1
+```
+
+## Hot-Reload and Auto-Rebuild
+
+When running a binary built by `xsclaw`, sclaw monitors the plugin list on configuration reload:
+
+<Steps>
+
+### Plugin Change Detection
+
+The bootstrapper computes a hash of the current plugin list and compares it with the running binary's embedded hash.
+
+### Rebuild
+
+If the hash differs, `xsclaw` is invoked to build a new binary with the updated plugin list.
+
+### Re-exec
+
+Once the new binary is built, sclaw performs a `syscall.Exec` to replace the running process with the new binary — maintaining the same PID and file descriptors.
+
+</Steps>
+
+<Note>
+Auto-rebuild requires `xsclaw` to be available in `$PATH`. If not found, plugin changes require a manual rebuild and restart.
+</Note>
+
+## Plugin Certification
+
+For production deployments, you can require plugins to be cryptographically signed:
+
+```yaml
+security:
+  plugins:
+    require_certified: true
+    trusted_keys:
+      - "a1b2c3d4e5f6..."  # Hex-encoded Ed25519 public key
+```
+
+sclaw uses Ed25519 signatures to verify plugin authenticity. Only plugins signed by a key in the `trusted_keys` list are accepted during the build phase.
+
+See [Security Configuration](/configuration/security) for details.
+
+## Creating a Plugin
+
+A sclaw plugin is a standard Go module that registers one or more modules via `init()`:
+
+```go
+package myplugin
+
+import "github.com/flemzord/sclaw/internal/core"
+
+func init() {
+    core.RegisterModule(core.ModuleInfo{
+        ID:  "tool.weather",
+        New: func() core.Module { return &WeatherTool{} },
+    })
+}
+```
+
+See [Creating Modules](/development/creating-modules) for the full guide.
