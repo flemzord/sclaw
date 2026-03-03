@@ -32,6 +32,7 @@ internal/             → Private packages (not importable)
                         sandboxing, URL filtering)
   internal/subagent/  → Ephemeral sub-agent sessions
   internal/tool/      → Tool registry + approval system
+  internal/tool/configtool/ → Runtime config tools (get, validate, patch, apply)
   internal/workspace/ → Working directory management
 pkg/                  → Public reusable packages
   pkg/app/            → Shared entry point (Run, ResolveConfigPath)
@@ -135,6 +136,7 @@ sclaw implements defense-in-depth security across the entire message pipeline:
 | Auth middleware | Bearer + Basic auth with constant-time comparison | `internal/gateway/auth.go` |
 | Webhook validation | HMAC-SHA256 signature verification per source | `internal/gateway/webhook.go` |
 | Plugin certification | Ed25519 signature verification with trusted key list | `internal/cert/` |
+| Config tool safety | Hash-based optimistic locking, validation before write, secret redaction, fixed path | `internal/tool/configtool/` |
 
 See `docs/security/prompt-injection.md` for the full threat model and mitigation details.
 
@@ -221,6 +223,38 @@ sclaw supports live configuration reload via `SIGHUP` or file polling. The reloa
 | Providers | Single default provider, no per-agent resolution yet |
 | Global tools | Built once at startup; per-agent allowlists take effect immediately |
 | Memory module | DB connections are long-lived; new agents get lazy-opened stores |
+
+## Config Tools (Runtime)
+
+The agent can read and modify `sclaw.yaml` at runtime via four tools registered in `internal/tool/configtool/`:
+
+| Tool | Scope | Default Policy | Description |
+|------|-------|----------------|-------------|
+| `config.get` | `read_only` | `allow` | Read the current config (redacted) + SHA-256 `base_hash` |
+| `config.validate` | `read_only` | `allow` | Dry-run validation of YAML content (no disk write) |
+| `config.patch` | `read_write` | `ask` | Merge a partial YAML patch into the current config |
+| `config.apply` | `read_write` | `ask` | Replace the entire config with new YAML content |
+
+### Concurrency Control
+
+Write tools (`patch`, `apply`) require a `base_hash` obtained from `config.get`. If the file changed since that hash was computed, the operation is rejected (optimistic locking).
+
+### Write Flow
+
+1. Verify `base_hash` matches current file hash
+2. Merge (patch) or replace (apply) the YAML content
+3. Validate the result (`config.LoadFromBytes` + `config.Validate`)
+4. Atomic write (temp file + `os.Rename`)
+5. Trigger in-process hot-reload via `reload.Handler`
+6. Warn if plugin list changed (requires rebuild)
+
+### Key Design Decisions
+
+- Works on `*yaml.Node` (not `map[string]any`) to preserve `${VAR}` references, comments, and key ordering
+- Merge follows RFC 7386 (JSON Merge Patch) adapted for YAML: mappings merge recursively, sequences replace entirely, `null` deletes keys
+- Config path is fixed by closure — the agent cannot target arbitrary files
+- Max config/patch size: 1 MiB
+- Secrets are redacted in `config.get` output via `security.Redactor.RedactMap()`
 
 ## CI/CD
 
