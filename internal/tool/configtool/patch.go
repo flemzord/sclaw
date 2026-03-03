@@ -19,9 +19,9 @@ func newPatchTool(deps Deps) tool.Tool {
 	return &patchTool{deps: deps}
 }
 
-func (t *patchTool) Name() string { return "config.patch" }
+func (t *patchTool) Name() string { return "config_patch" }
 func (t *patchTool) Description() string {
-	return "Partially merge a YAML patch into the current configuration. Requires base_hash from config.get for concurrency control. Validates before writing and triggers a hot-reload."
+	return "Partially merge a YAML patch into the current configuration. Requires base_hash from config_get for concurrency control. Validates before writing and triggers a hot-reload."
 }
 func (t *patchTool) Scopes() []tool.Scope              { return []tool.Scope{tool.ScopeReadWrite} }
 func (t *patchTool) DefaultPolicy() tool.ApprovalLevel { return tool.ApprovalAsk }
@@ -32,7 +32,7 @@ func (t *patchTool) Schema() json.RawMessage {
 		"properties": {
 			"base_hash": {
 				"type": "string",
-				"description": "SHA-256 hash from config.get. The patch is rejected if the file changed since this hash was computed."
+				"description": "SHA-256 hash from config_get. The patch is rejected if the file changed since this hash was computed."
 			},
 			"patch": {
 				"type": "string",

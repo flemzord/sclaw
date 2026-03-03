@@ -15,7 +15,7 @@ func newValidateTool() tool.Tool {
 	return &validateTool{}
 }
 
-func (t *validateTool) Name() string { return "config.validate" }
+func (t *validateTool) Name() string { return "config_validate" }
 func (t *validateTool) Description() string {
 	return "Validate YAML configuration without writing to disk (dry-run). Returns validation errors if any."
 }

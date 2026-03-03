@@ -18,9 +18,9 @@ func newApplyTool(deps Deps) tool.Tool {
 	return &applyTool{deps: deps}
 }
 
-func (t *applyTool) Name() string { return "config.apply" }
+func (t *applyTool) Name() string { return "config_apply" }
 func (t *applyTool) Description() string {
-	return "Replace the entire configuration with new YAML content. Requires base_hash from config.get for concurrency control. Validates before writing and triggers a hot-reload."
+	return "Replace the entire configuration with new YAML content. Requires base_hash from config_get for concurrency control. Validates before writing and triggers a hot-reload."
 }
 func (t *applyTool) Scopes() []tool.Scope              { return []tool.Scope{tool.ScopeReadWrite} }
 func (t *applyTool) DefaultPolicy() tool.ApprovalLevel { return tool.ApprovalAsk }
@@ -31,7 +31,7 @@ func (t *applyTool) Schema() json.RawMessage {
 		"properties": {
 			"base_hash": {
 				"type": "string",
-				"description": "SHA-256 hash from config.get. The apply is rejected if the file changed since this hash was computed."
+				"description": "SHA-256 hash from config_get. The apply is rejected if the file changed since this hash was computed."
 			},
 			"yaml_content": {
 				"type": "string",

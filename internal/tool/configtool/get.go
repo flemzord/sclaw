@@ -17,7 +17,7 @@ func newGetTool(deps Deps) tool.Tool {
 	return &getTool{deps: deps}
 }
 
-func (t *getTool) Name() string { return "config.get" }
+func (t *getTool) Name() string { return "config_get" }
 func (t *getTool) Description() string {
 	return "Read the current sclaw configuration (redacted) and its base hash for use in subsequent patch/apply calls."
 }

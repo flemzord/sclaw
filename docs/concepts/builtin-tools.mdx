@@ -121,7 +121,7 @@ Write content to a file in the workspace or read-write allowed directories.
 {"path": "notes/standup.md", "content": "# Standup 2025-01-15\n- Reviewed PR #42\n- Fixed CI flake"}
 ```
 
-## config.get
+## config_get
 
 Read the current configuration and compute a hash for concurrency control.
 
@@ -150,9 +150,9 @@ No parameters required.
 }
 ```
 
-The `base_hash` is required by `config.patch` and `config.apply` for optimistic concurrency control.
+The `base_hash` is required by `config_patch` and `config_apply` for optimistic concurrency control.
 
-## config.validate
+## config_validate
 
 Dry-run validation of YAML configuration without writing to disk.
 
@@ -176,7 +176,7 @@ Dry-run validation of YAML configuration without writing to disk.
 - Returns `valid: true` or `valid: false` with the error message
 - No side effects — purely informational
 
-## config.patch
+## config_patch
 
 Merge a partial YAML patch into the current configuration.
 
@@ -189,7 +189,7 @@ Merge a partial YAML patch into the current configuration.
 
 ```json
 {
-  "base_hash": "string (required, from config.get)",
+  "base_hash": "string (required, from config_get)",
   "patch": "string (required, partial YAML to merge)"
 }
 ```
@@ -207,7 +207,7 @@ Merge a partial YAML patch into the current configuration.
 - Warns if the plugin list changed (rebuild may be required)
 - Preserves `${VAR}` references, comments, and key ordering
 
-## config.apply
+## config_apply
 
 Replace the entire configuration with new YAML content.
 
@@ -220,14 +220,14 @@ Replace the entire configuration with new YAML content.
 
 ```json
 {
-  "base_hash": "string (required, from config.get)",
+  "base_hash": "string (required, from config_get)",
   "yaml_content": "string (required, complete YAML)"
 }
 ```
 
 ### Behavior
 
-- Same concurrency control as `config.patch` via `base_hash`
+- Same concurrency control as `config_patch` via `base_hash`
 - Full replacement instead of merge
 - Validates the new content before writing
 - Atomic write + hot-reload
@@ -235,10 +235,10 @@ Replace the entire configuration with new YAML content.
 ### Typical Workflow
 
 ```
-1. config.get        → read config + base_hash
-2. config.validate   → dry-run check (optional)
-3. config.patch      → merge partial changes
-   or config.apply   → replace entirely
+1. config_get        → read config + base_hash
+2. config_validate   → dry-run check (optional)
+3. config_patch      → merge partial changes
+   or config_apply   → replace entirely
 4. (hot-reload triggers automatically)
 ```
 
@@ -254,8 +254,8 @@ All built-in tools enforce consistent security boundaries:
 | **Secret leakage** | `exec` uses `SanitizedEnv` — API keys, tokens, and credentials are stripped |
 | **Resource limits** | 1 MiB cap on file reads, file writes, command output, and config content |
 | **Timeout** | `exec` defaults to 30s, capped at 10 minutes |
-| **Concurrency control** | `config.patch`/`config.apply` use SHA-256 hash to prevent lost updates |
-| **Secret redaction** | `config.get` redacts all secrets before returning config to the LLM |
+| **Concurrency control** | `config_patch`/`config_apply` use SHA-256 hash to prevent lost updates |
+| **Secret redaction** | `config_get` redacts all secrets before returning config to the LLM |
 | **Atomic writes** | Config changes use temp file + rename to prevent partial writes |
 
 ## Approval Policies

@@ -137,6 +137,7 @@ sclaw implements defense-in-depth security across the entire message pipeline:
 | Webhook validation | HMAC-SHA256 signature verification per source | `internal/gateway/webhook.go` |
 | Plugin certification | Ed25519 signature verification with trusted key list | `internal/cert/` |
 | Config tool safety | Hash-based optimistic locking, validation before write, secret redaction, fixed path | `internal/tool/configtool/` |
+| 1Password integration | `op://` secret references resolved via `op read` at config load | `internal/config/onepassword.go` |
 
 See `docs/security/prompt-injection.md` for the full threat model and mitigation details.
 
@@ -230,14 +231,14 @@ The agent can read and modify `sclaw.yaml` at runtime via four tools registered 
 
 | Tool | Scope | Default Policy | Description |
 |------|-------|----------------|-------------|
-| `config.get` | `read_only` | `allow` | Read the current config (redacted) + SHA-256 `base_hash` |
-| `config.validate` | `read_only` | `allow` | Dry-run validation of YAML content (no disk write) |
-| `config.patch` | `read_write` | `ask` | Merge a partial YAML patch into the current config |
-| `config.apply` | `read_write` | `ask` | Replace the entire config with new YAML content |
+| `config_get` | `read_only` | `allow` | Read the current config (redacted) + SHA-256 `base_hash` |
+| `config_validate` | `read_only` | `allow` | Dry-run validation of YAML content (no disk write) |
+| `config_patch` | `read_write` | `ask` | Merge a partial YAML patch into the current config |
+| `config_apply` | `read_write` | `ask` | Replace the entire config with new YAML content |
 
 ### Concurrency Control
 
-Write tools (`patch`, `apply`) require a `base_hash` obtained from `config.get`. If the file changed since that hash was computed, the operation is rejected (optimistic locking).
+Write tools (`patch`, `apply`) require a `base_hash` obtained from `config_get`. If the file changed since that hash was computed, the operation is rejected (optimistic locking).
 
 ### Write Flow
 
@@ -254,7 +255,7 @@ Write tools (`patch`, `apply`) require a `base_hash` obtained from `config.get`.
 - Merge follows RFC 7386 (JSON Merge Patch) adapted for YAML: mappings merge recursively, sequences replace entirely, `null` deletes keys
 - Config path is fixed by closure — the agent cannot target arbitrary files
 - Max config/patch size: 1 MiB
-- Secrets are redacted in `config.get` output via `security.Redactor.RedactMap()`
+- Secrets are redacted in `config_get` output via `security.Redactor.RedactMap()`
 
 ## CI/CD
 
