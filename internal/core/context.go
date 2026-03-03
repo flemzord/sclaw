@@ -22,6 +22,7 @@ type AppContext struct {
 
 	parentLogger  *slog.Logger
 	moduleConfigs map[string]yaml.Node
+	agentConfigs  map[string]yaml.Node
 	services      map[string]interface{}
 }
 
@@ -46,6 +47,19 @@ func (ctx *AppContext) WithModuleConfigs(configs map[string]yaml.Node) *AppConte
 	return &cp
 }
 
+// WithAgentConfigs returns a copy of the AppContext with agent configurations set.
+// Each key is an agent name mapping to its raw YAML configuration node.
+func (ctx *AppContext) WithAgentConfigs(configs map[string]yaml.Node) *AppContext {
+	cp := *ctx
+	cp.agentConfigs = configs
+	return &cp
+}
+
+// AgentConfigs returns the raw agent configuration nodes, or nil if not set.
+func (ctx *AppContext) AgentConfigs() map[string]yaml.Node {
+	return ctx.agentConfigs
+}
+
 // ForModule returns a new AppContext scoped to the given module ID,
 // with a child logger that includes the module ID.
 func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
@@ -55,6 +69,7 @@ func (ctx *AppContext) ForModule(id ModuleID) *AppContext {
 		Workspace:     ctx.Workspace,
 		parentLogger:  ctx.parentLogger,
 		moduleConfigs: ctx.moduleConfigs,
+		agentConfigs:  ctx.agentConfigs,
 		services:      ctx.services,
 	}
 }

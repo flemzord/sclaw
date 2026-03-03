@@ -3,6 +3,7 @@ package multiagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1013,5 +1014,396 @@ func TestFactory_ResolveSkills_ExcludeAppliesToBuiltin(t *testing.T) {
 	}
 	if strings.Contains(result, "<name>drop</name>") {
 		t.Errorf("result should not contain excluded builtin skill 'drop':\n%s", result)
+	}
+}
+
+func TestFactory_Reload_SwapsRegistry(t *testing.T) {
+	t.Parallel()
+
+	agentsA := map[string]AgentConfig{
+		"alpha": {
+			Workspace: "/ws/alpha",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regA, err := NewRegistry(agentsA, []string{"alpha"})
+	if err != nil {
+		t.Fatalf("NewRegistry A: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        regA,
+		DefaultProvider: newStubProvider(),
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+	})
+
+	// Initially resolves to "alpha".
+	session := &router.Session{ID: "s1"}
+	msg := message.InboundMessage{
+		Channel: "test",
+		Sender:  message.Sender{ID: "user"},
+		Chat:    message.Chat{ID: "chat"},
+	}
+	loop, err := factory.ForSession(session, msg)
+	if err != nil {
+		t.Fatalf("ForSession before reload: %v", err)
+	}
+	if loop == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if session.AgentID != "alpha" {
+		t.Errorf("AgentID = %q, want %q", session.AgentID, "alpha")
+	}
+
+	// Reload with a new registry containing "beta".
+	agentsB := map[string]AgentConfig{
+		"beta": {
+			Workspace: "/ws/beta",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regB, err := NewRegistry(agentsB, []string{"beta"})
+	if err != nil {
+		t.Fatalf("NewRegistry B: %v", err)
+	}
+	factory.Reload(regB)
+
+	// New session should resolve to "beta".
+	session2 := &router.Session{ID: "s2"}
+	loop2, err := factory.ForSession(session2, msg)
+	if err != nil {
+		t.Fatalf("ForSession after reload: %v", err)
+	}
+	if loop2 == nil {
+		t.Fatal("expected non-nil loop after reload")
+	}
+	if session2.AgentID != "beta" {
+		t.Errorf("AgentID = %q, want %q", session2.AgentID, "beta")
+	}
+}
+
+func TestFactory_Reload_ExistingSessionKeepsAgentID(t *testing.T) {
+	t.Parallel()
+
+	agentsA := map[string]AgentConfig{
+		"old-agent": {
+			Workspace: "/ws/old",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regA, err := NewRegistry(agentsA, []string{"old-agent"})
+	if err != nil {
+		t.Fatalf("NewRegistry A: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        regA,
+		DefaultProvider: newStubProvider(),
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+	})
+
+	// Reload with registry that contains the same agent ID but different config.
+	agentsB := map[string]AgentConfig{
+		"old-agent": {
+			Workspace: "/ws/new",
+			Tools:     []string{"search"},
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regB, err := NewRegistry(agentsB, []string{"old-agent"})
+	if err != nil {
+		t.Fatalf("NewRegistry B: %v", err)
+	}
+	factory.Reload(regB)
+
+	// Session with pre-set AgentID should keep it and use the new config.
+	session := &router.Session{ID: "s1", AgentID: "old-agent"}
+	msg := message.InboundMessage{
+		Channel: "test",
+		Sender:  message.Sender{ID: "user"},
+		Chat:    message.Chat{ID: "chat"},
+	}
+	loop, err := factory.ForSession(session, msg)
+	if err != nil {
+		t.Fatalf("ForSession: %v", err)
+	}
+	if loop == nil {
+		t.Fatal("expected non-nil loop")
+	}
+	if session.AgentID != "old-agent" {
+		t.Errorf("AgentID = %q, want %q", session.AgentID, "old-agent")
+	}
+}
+
+func TestFactory_Reload_InvalidatesSoulsOnDataDirChange(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentsA := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot-v1"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	if err := EnsureDirectories(agentsA); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	regA, err := NewRegistry(agentsA, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry A: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: regA,
+		Logger:   slog.Default(),
+	})
+
+	// Populate the soul cache.
+	_, err = factory.ResolveSoul("bot")
+	if err != nil {
+		t.Fatalf("ResolveSoul: %v", err)
+	}
+
+	factory.mu.RLock()
+	_, cached := factory.souls["bot"]
+	factory.mu.RUnlock()
+	if !cached {
+		t.Fatal("expected soul to be cached before reload")
+	}
+
+	// Reload with changed DataDir.
+	agentsB := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot-v2"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	if err := EnsureDirectories(agentsB); err != nil {
+		t.Fatalf("EnsureDirectories B: %v", err)
+	}
+	regB, err := NewRegistry(agentsB, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry B: %v", err)
+	}
+	factory.Reload(regB)
+
+	// Soul cache should be invalidated.
+	factory.mu.RLock()
+	_, cached = factory.souls["bot"]
+	factory.mu.RUnlock()
+	if cached {
+		t.Error("expected soul cache to be invalidated after DataDir change")
+	}
+}
+
+func TestFactory_Reload_InvalidatesStoresOnMemoryToggle(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentsA := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agentsA, tmpDir)
+	if err := EnsureDirectories(agentsA); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	regA, err := NewRegistry(agentsA, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry A: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: regA,
+		Logger:   slog.Default(),
+	})
+	defer func() { _ = factory.Close() }()
+
+	// Populate store cache.
+	store := factory.ResolveHistory("bot")
+	if store == nil {
+		t.Fatal("expected non-nil store before reload")
+	}
+
+	// Reload with memory disabled.
+	disabled := false
+	agentsB := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot"),
+			Memory:  MemoryConfig{Enabled: &disabled},
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	regB, err := NewRegistry(agentsB, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry B: %v", err)
+	}
+	factory.Reload(regB)
+
+	// Store cache should be invalidated.
+	factory.mu.RLock()
+	_, cached := factory.stores["bot"]
+	factory.mu.RUnlock()
+	if cached {
+		t.Error("expected store cache to be invalidated after memory toggle")
+	}
+}
+
+func TestFactory_Reload_PreservesUnchangedCaches(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"stable": {
+			DataDir: filepath.Join(tmpDir, "agents", "stable"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"stable"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+	defer func() { _ = factory.Close() }()
+
+	// Populate caches.
+	_, _ = factory.ResolveSoul("stable")
+	_ = factory.ResolveHistory("stable")
+
+	// Reload with identical config.
+	reg2, err := NewRegistry(agents, []string{"stable"})
+	if err != nil {
+		t.Fatalf("NewRegistry 2: %v", err)
+	}
+	factory.Reload(reg2)
+
+	// Both caches should still be populated.
+	factory.mu.RLock()
+	_, soulCached := factory.souls["stable"]
+	_, storeCached := factory.stores["stable"]
+	factory.mu.RUnlock()
+
+	if !soulCached {
+		t.Error("soul cache should be preserved for unchanged agent")
+	}
+	if !storeCached {
+		t.Error("store cache should be preserved for unchanged agent")
+	}
+}
+
+func TestFactory_Reload_RemovedAgent(t *testing.T) {
+	t.Parallel()
+
+	agentsA := map[string]AgentConfig{
+		"existing": {
+			Workspace: "/ws/existing",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regA, err := NewRegistry(agentsA, []string{"existing"})
+	if err != nil {
+		t.Fatalf("NewRegistry A: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        regA,
+		DefaultProvider: newStubProvider(),
+		GlobalTools:     tool.NewRegistry(),
+		Logger:          slog.Default(),
+	})
+
+	// Reload without the agent.
+	agentsB := map[string]AgentConfig{
+		"replacement": {
+			Workspace: "/ws/replacement",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	regB, err := NewRegistry(agentsB, []string{"replacement"})
+	if err != nil {
+		t.Fatalf("NewRegistry B: %v", err)
+	}
+	factory.Reload(regB)
+
+	// Session with removed agent should fail.
+	session := &router.Session{ID: "s1", AgentID: "existing"}
+	msg := message.InboundMessage{
+		Channel: "test",
+		Sender:  message.Sender{ID: "user"},
+		Chat:    message.Chat{ID: "chat"},
+	}
+	_, err = factory.ForSession(session, msg)
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Errorf("ForSession error = %v, want %v", err, ErrAgentNotFound)
+	}
+}
+
+func TestFactory_Reload_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			Workspace: "/ws/bot",
+			Routing:   RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		DefaultProvider: newStubProvider(),
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+	})
+
+	msg := message.InboundMessage{
+		Channel: "test",
+		Sender:  message.Sender{ID: "user"},
+		Chat:    message.Chat{ID: "chat"},
+	}
+
+	// Run concurrent ForSession calls and reloads.
+	// The -race detector validates correctness.
+	done := make(chan struct{})
+	const readers = 10
+	const reloads = 5
+
+	for i := range readers {
+		go func(n int) {
+			defer func() { done <- struct{}{} }()
+			for j := range 20 {
+				session := &router.Session{ID: fmt.Sprintf("s-%d-%d", n, j)}
+				_, _ = factory.ForSession(session, msg)
+			}
+		}(i)
+	}
+
+	for range reloads {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for range 4 {
+				newReg, _ := NewRegistry(agents, []string{"bot"})
+				factory.Reload(newReg)
+			}
+		}()
+	}
+
+	for range readers + reloads {
+		<-done
 	}
 }

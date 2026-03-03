@@ -90,6 +90,7 @@ run-tests  # Run tests with race detector + coverage
 - **Encapsulate channels behind methods**: Never export raw channels. Expose a method with state validation (e.g., `Respond()` that checks if an approval is pending) to prevent misuse of concurrent primitives.
 - **Defer health verdicts**: When tracking provider health, record success only after the full operation completes (including stream consumption), not just at connection time. Mid-stream errors must degrade health.
 - **Acquire locks before sharing pointers**: Never pass a pointer to shared mutable state (e.g., `*Session`) to a function before acquiring the lock that protects it. Move the call after lock acquisition, or pass only immutable identifiers (like a session ID) instead of the live pointer.
+- **Use atomic.Pointer for hot-path reads of immutable data**: When a shared immutable object (e.g., `*Registry`) is read on every message but swapped rarely (config reload), use `atomic.Pointer[T]` instead of `RWMutex`. `atomic.Load` is a single CPU instruction with zero contention, while `RWMutex.RLock` requires a CAS + counter increment.
 
 ### Code Quality
 
@@ -187,6 +188,39 @@ metadata:
 - `internal/workspace/skill.go` — `ParseSkill`, `SkillMeta` struct, frontmatter parsing
 - `internal/workspace/activator.go` — `SkillActivator.Activate` (3-pass: always → auto → manual)
 - `skills/embed.go` — `go:embed` directive for builtin skills
+
+## Hot Reload
+
+sclaw supports live configuration reload via `SIGHUP` or file polling. The reload flow is:
+
+1. `reload.Handler` loads and validates the new config from disk
+2. `AppContext` carries both `ModuleConfigs` and `AgentConfigs` (raw YAML nodes)
+3. `core.App.ReloadModules()` calls `Reload()` on every module that implements `core.Reloader`
+
+### Agent Reload (`routerModule.Reload`)
+
+- Parses new agent YAML nodes → `multiagent.ParseAgents`
+- Resolves defaults and creates directories
+- Builds a new immutable `*Registry`
+- Atomically swaps the Registry in `Factory` via `atomic.Pointer[Registry]`
+- Selectively invalidates caches (souls, history stores) for changed agents
+- In-flight messages continue with the old Registry snapshot; next `ForSession()` uses the new one
+
+### Cron Reload (`schedulerModule.Reload`)
+
+- Parses new agent configs → builds new Registry
+- Stops the old `cron.Scheduler` (10s timeout, waits for in-flight jobs)
+- Creates a new Scheduler with per-agent jobs (session cleanup, memory extraction, memory compaction)
+- Starts the new Scheduler
+
+### What Does NOT Reload
+
+| Component | Reason |
+|-----------|--------|
+| Channels (Telegram, Discord, etc.) | Stateful connections, require restart |
+| Providers | Single default provider, no per-agent resolution yet |
+| Global tools | Built once at startup; per-agent allowlists take effect immediately |
+| Memory module | DB connections are long-lived; new agents get lazy-opened stores |
 
 ## CI/CD
 

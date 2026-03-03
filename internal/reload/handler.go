@@ -54,6 +54,7 @@ func (h *Handler) handleReload(ctx context.Context, cfg *config.Config) error {
 
 	appCtx := core.NewAppContext(h.logger, h.dataDir, h.workspace)
 	appCtx = appCtx.WithModuleConfigs(cfg.Modules)
+	appCtx = appCtx.WithAgentConfigs(cfg.Agents)
 
 	if err := h.app.ReloadModules(appCtx); err != nil {
 		return fmt.Errorf("reloading modules: %w", err)

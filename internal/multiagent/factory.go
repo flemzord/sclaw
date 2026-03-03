@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
@@ -65,6 +66,9 @@ type FactoryConfig struct {
 type Factory struct {
 	cfg FactoryConfig
 
+	// registry holds the current immutable Registry, swapped atomically on reload.
+	registry atomic.Pointer[Registry]
+
 	subAgentMgr *subagent.Manager
 
 	mu     sync.RWMutex
@@ -83,11 +87,13 @@ var (
 
 // NewFactory creates a Factory from the given configuration.
 func NewFactory(cfg FactoryConfig) *Factory {
-	return &Factory{
+	f := &Factory{
 		cfg:    cfg,
 		stores: make(map[string]memory.HistoryStore),
 		souls:  make(map[string]workspace.SoulProvider),
 	}
+	f.registry.Store(cfg.Registry)
+	return f
 }
 
 // SetSubAgentManager sets the sub-agent manager on the factory.
@@ -96,6 +102,12 @@ func NewFactory(cfg FactoryConfig) *Factory {
 // owned by Factory.
 func (f *Factory) SetSubAgentManager(mgr *subagent.Manager) {
 	f.subAgentMgr = mgr
+}
+
+// currentRegistry returns the current immutable Registry.
+// Uses atomic load for lock-free access on the hot path (ForSession).
+func (f *Factory) currentRegistry() *Registry {
+	return f.registry.Load()
 }
 
 // GlobalTools returns the global tool registry.
@@ -109,7 +121,7 @@ func (f *Factory) GlobalTools() *tool.Registry {
 func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage) (*agent.Loop, error) {
 	agentID := session.AgentID
 	if agentID == "" {
-		resolved, err := f.cfg.Registry.Resolve(msg)
+		resolved, err := f.currentRegistry().Resolve(msg)
 		if err != nil {
 			return nil, fmt.Errorf("multiagent: resolving agent for session %s: %w", session.ID, err)
 		}
@@ -117,7 +129,7 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 		session.AgentID = agentID
 	}
 
-	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
@@ -236,7 +248,7 @@ func (f *Factory) ResolveHistory(agentID string) memory.HistoryStore {
 		return s
 	}
 
-	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
 	if !ok || !agentCfg.Memory.IsEnabled() || agentCfg.DataDir == "" {
 		// Cache nil to avoid repeated lookups.
 		f.stores[agentID] = nil
@@ -291,7 +303,7 @@ func (f *Factory) ResolveSoul(agentID string) (string, error) {
 		return loader.Load()
 	}
 
-	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
 	if !ok || agentCfg.DataDir == "" {
 		return workspace.DefaultSoulPrompt, nil
 	}
@@ -312,7 +324,7 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		logger = slog.Default()
 	}
 
-	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
 	if !ok {
 		return "", nil
 	}
@@ -377,6 +389,54 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 	)
 
 	return workspace.FormatSkillsForPrompt(active), nil
+}
+
+// Reload atomically swaps the Registry and selectively invalidates caches
+// for agents whose configuration has changed. In-flight messages that already
+// loaded the old Registry via atomic.Load continue unaffected; the next
+// ForSession call will use the new Registry.
+func (f *Factory) Reload(newRegistry *Registry) {
+	old := f.registry.Swap(newRegistry)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Build a set of new agent IDs for quick lookup.
+	newIDs := make(map[string]struct{}, len(newRegistry.AgentIDs()))
+	for _, id := range newRegistry.AgentIDs() {
+		newIDs[id] = struct{}{}
+	}
+
+	// Invalidate souls cache: remove entries for deleted agents or agents
+	// whose DataDir changed (which changes the SOUL.md path).
+	for agentID := range f.souls {
+		oldCfg, oldOK := old.AgentConfig(agentID)
+		newCfg, newOK := newRegistry.AgentConfig(agentID)
+		if !newOK || (oldOK && oldCfg.DataDir != newCfg.DataDir) {
+			delete(f.souls, agentID)
+		}
+	}
+
+	// Invalidate stores cache: remove entries for deleted agents, agents
+	// whose DataDir changed, or agents whose memory enabled state changed.
+	for agentID := range f.stores {
+		oldCfg, oldOK := old.AgentConfig(agentID)
+		newCfg, newOK := newRegistry.AgentConfig(agentID)
+		if !newOK {
+			delete(f.stores, agentID)
+			continue
+		}
+		if oldOK && (oldCfg.DataDir != newCfg.DataDir || oldCfg.Memory.IsEnabled() != newCfg.Memory.IsEnabled()) {
+			delete(f.stores, agentID)
+		}
+	}
+
+	if f.cfg.Logger != nil {
+		f.cfg.Logger.Info("multiagent: registry reloaded",
+			"old_agents", old.AgentIDs(),
+			"new_agents", newRegistry.AgentIDs(),
+		)
+	}
 }
 
 // Close closes all SQLite databases opened by ResolveHistory.

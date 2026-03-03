@@ -13,26 +13,25 @@ import (
 	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/provider"
+	"github.com/flemzord/sclaw/internal/reload"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/subagent"
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/internal/tool/builtin"
+	"github.com/flemzord/sclaw/internal/tool/configtool"
 	"github.com/flemzord/sclaw/skills"
 )
 
-// factoryCloser is implemented by multiagent.Factory to close SQLite databases.
-type factoryCloser interface {
-	Close() error
-}
-
 // routerModule wraps a *router.Router to satisfy core.Module, core.Starter,
-// and core.Stopper, so the router participates in the App lifecycle.
+// core.Stopper, and core.Reloader, so the router participates in the App lifecycle.
 type routerModule struct {
 	router      *router.Router
-	factory     factoryCloser
+	factory     *multiagent.Factory
 	subagentMgr *subagent.Manager
 	ctx         context.Context
+	logger      *slog.Logger
+	dataDir     string
 }
 
 func (m *routerModule) ModuleInfo() core.ModuleInfo {
@@ -52,6 +51,37 @@ func (m *routerModule) Stop(ctx context.Context) error {
 	if m.factory != nil {
 		return m.factory.Close()
 	}
+	return nil
+}
+
+// Reload parses new agent configs, builds a fresh Registry, and atomically
+// swaps it into the Factory. If AgentConfigs is nil, reload is a no-op.
+func (m *routerModule) Reload(ctx *core.AppContext) error {
+	agents := ctx.AgentConfigs()
+	if agents == nil {
+		return nil
+	}
+
+	parsed, order, err := multiagent.ParseAgents(agents)
+	if err != nil {
+		return fmt.Errorf("router: parsing agents: %w", err)
+	}
+
+	multiagent.ResolveDefaults(parsed, m.dataDir)
+
+	if err := multiagent.EnsureDirectories(parsed); err != nil {
+		return fmt.Errorf("router: creating agent directories: %w", err)
+	}
+
+	newRegistry, err := multiagent.NewRegistry(parsed, order)
+	if err != nil {
+		return fmt.Errorf("router: creating registry: %w", err)
+	}
+
+	m.factory.Reload(newRegistry)
+	m.logger.Info("router: agent configuration reloaded",
+		"agents", len(parsed),
+	)
 	return nil
 }
 
@@ -141,6 +171,32 @@ func wireRouter(
 		return fmt.Errorf("registering built-in tools: %w", err)
 	}
 
+	// Register config tools (read/modify sclaw.yaml at runtime).
+	var cfgPath string
+	if svc, ok := appCtx.GetService("config.path"); ok {
+		cfgPath, _ = svc.(string)
+	}
+	var redactor *security.Redactor
+	if svc, ok := appCtx.GetService("security.redactor"); ok {
+		redactor, _ = svc.(*security.Redactor)
+	}
+	if cfgPath != "" {
+		if err := configtool.RegisterAll(globalTools, configtool.Deps{
+			ConfigPath: cfgPath,
+			Redactor:   redactor,
+			ReloadFn: func(ctx context.Context, path string) error {
+				if svc, ok := appCtx.GetService("reload.handler"); ok {
+					if h, ok := svc.(*reload.Handler); ok {
+						return h.HandleReload(ctx, path)
+					}
+				}
+				return fmt.Errorf("reload handler not available")
+			},
+		}); err != nil {
+			return fmt.Errorf("registering config tools: %w", err)
+		}
+	}
+
 	// Resolve sanitized environment for subprocess tools.
 	var sanitizedEnv []string
 	if svc, ok := appCtx.GetService("security.sanitized_env"); ok {
@@ -199,6 +255,8 @@ func wireRouter(
 		factory:     factory,
 		subagentMgr: subMgr,
 		ctx:         context.Background(),
+		logger:      logger,
+		dataDir:     appCtx.DataDir,
 	})
 
 	// Register the session store for the gateway to discover.
@@ -231,9 +289,16 @@ func (a *sessionRangerAdapter) Range(fn func(sessionID, agentID string) bool) {
 }
 
 // schedulerModule wraps a *cron.Scheduler to satisfy core.Module, core.Starter,
-// and core.Stopper, so the scheduler participates in the App lifecycle.
+// core.Stopper, and core.Reloader, so the scheduler participates in the App lifecycle.
 type schedulerModule struct {
-	scheduler *cron.Scheduler
+	scheduler    *cron.Scheduler
+	logger       *slog.Logger
+	dataDir      string
+	sessionStore cron.SessionStore
+	ranger       cron.SessionRanger
+	historyStore memory.HistoryStore
+	memoryStore  memory.Store
+	extractor    memory.FactExtractor
 }
 
 func (m *schedulerModule) ModuleInfo() core.ModuleInfo {
@@ -246,6 +311,83 @@ func (m *schedulerModule) Start() error {
 
 func (m *schedulerModule) Stop(ctx context.Context) error {
 	return m.scheduler.Stop(ctx)
+}
+
+// Reload stops the current scheduler, creates a new one with jobs derived
+// from the new agent configs, and starts it. If AgentConfigs is nil, reload
+// is a no-op.
+func (m *schedulerModule) Reload(ctx *core.AppContext) error {
+	agents := ctx.AgentConfigs()
+	if agents == nil {
+		return nil
+	}
+
+	parsed, order, err := multiagent.ParseAgents(agents)
+	if err != nil {
+		return fmt.Errorf("cron: parsing agents: %w", err)
+	}
+
+	multiagent.ResolveDefaults(parsed, m.dataDir)
+
+	registry, err := multiagent.NewRegistry(parsed, order)
+	if err != nil {
+		return fmt.Errorf("cron: creating registry: %w", err)
+	}
+
+	// Stop old scheduler with a 10s timeout.
+	stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := m.scheduler.Stop(stopCtx); err != nil {
+		m.logger.Error("cron: error stopping scheduler during reload", "error", err)
+	}
+
+	// Create and populate new scheduler.
+	newScheduler := cron.NewScheduler(m.logger)
+
+	for _, agentID := range registry.AgentIDs() {
+		cfg, _ := registry.AgentConfig(agentID)
+		cronCfg := cfg.Cron
+
+		if m.sessionStore != nil {
+			if err := newScheduler.RegisterJob(&cron.SessionCleanupJob{
+				Store:        m.sessionStore,
+				MaxIdle:      cronCfg.SessionCleanup.MaxIdleOrDefault(),
+				Logger:       m.logger,
+				AgentID:      agentID,
+				ScheduleExpr: cronCfg.SessionCleanup.ScheduleOrDefault(),
+			}); err != nil {
+				return fmt.Errorf("cron: registering session cleanup for agent %s: %w", agentID, err)
+			}
+		}
+
+		if err := newScheduler.RegisterJob(&cron.MemoryExtractionJob{
+			Logger:       m.logger,
+			AgentID:      agentID,
+			ScheduleExpr: cronCfg.MemoryExtraction.ScheduleOrDefault(),
+			Sessions:     m.ranger,
+			History:      m.historyStore,
+			Store:        m.memoryStore,
+			Extractor:    m.extractor,
+		}); err != nil {
+			return fmt.Errorf("cron: registering memory extraction for agent %s: %w", agentID, err)
+		}
+
+		if err := newScheduler.RegisterJob(&cron.MemoryCompactionJob{
+			Logger:       m.logger,
+			AgentID:      agentID,
+			ScheduleExpr: cronCfg.MemoryCompaction.ScheduleOrDefault(),
+		}); err != nil {
+			return fmt.Errorf("cron: registering memory compaction for agent %s: %w", agentID, err)
+		}
+	}
+
+	if err := newScheduler.Start(); err != nil {
+		return fmt.Errorf("cron: starting new scheduler: %w", err)
+	}
+
+	m.scheduler = newScheduler
+	m.logger.Info("cron: scheduler reloaded", "agents", len(parsed))
+	return nil
 }
 
 // wireCron creates the cron Scheduler, registers background jobs, and appends
@@ -358,7 +500,16 @@ func wireCron(
 		}
 	}
 
-	app.AppendModule("cron", &schedulerModule{scheduler: s})
+	app.AppendModule("cron", &schedulerModule{
+		scheduler:    s,
+		logger:       logger,
+		dataDir:      appCtx.DataDir,
+		sessionStore: sessionStore,
+		ranger:       ranger,
+		historyStore: historyStore,
+		memoryStore:  memoryStore,
+		extractor:    extractor,
+	})
 	logger.Info("cron: wired")
 	return nil
 }
