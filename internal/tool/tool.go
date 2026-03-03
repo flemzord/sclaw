@@ -61,6 +61,10 @@ type ExecutionEnv struct {
 
 	// URLFilter, if non-nil, restricts which URLs network tools can access.
 	URLFilter *security.URLFilter
+
+	// PathFilter, if non-nil, grants read or read-write access to
+	// directories outside the workspace.
+	PathFilter *security.PathFilter
 }
 
 // Output is the result of a tool execution.

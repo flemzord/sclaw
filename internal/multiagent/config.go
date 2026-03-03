@@ -11,18 +11,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// AllowedDirEntry represents a directory outside the workspace that an agent
+// may access. Mode is "ro" (default) or "rw".
+type AllowedDirEntry struct {
+	Path string `yaml:"path"`
+	Mode string `yaml:"mode"`
+}
+
 // AgentConfig holds the configuration for a single agent.
 type AgentConfig struct {
-	DataDir       string        `yaml:"data_dir"`
-	Workspace     string        `yaml:"workspace"`
-	Provider      string        `yaml:"provider"`
-	Tools         []string      `yaml:"tools"`
-	ExcludeSkills []string      `yaml:"exclude_skills"`
-	Streaming     *bool         `yaml:"streaming"`
-	Memory        MemoryConfig  `yaml:"memory"`
-	Routing       RoutingConfig `yaml:"routing"`
-	Loop          LoopOverrides `yaml:"loop"`
-	Cron          CronConfig    `yaml:"cron"`
+	DataDir       string            `yaml:"data_dir"`
+	Workspace     string            `yaml:"workspace"`
+	AllowedDirs   []AllowedDirEntry `yaml:"allowed_dirs"`
+	Provider      string            `yaml:"provider"`
+	Tools         []string          `yaml:"tools"`
+	ExcludeSkills []string          `yaml:"exclude_skills"`
+	Streaming     *bool             `yaml:"streaming"`
+	Memory        MemoryConfig      `yaml:"memory"`
+	Routing       RoutingConfig     `yaml:"routing"`
+	Loop          LoopOverrides     `yaml:"loop"`
+	Cron          CronConfig        `yaml:"cron"`
 }
 
 // IsStreamingEnabled returns whether streaming is enabled for this agent.
@@ -139,6 +147,19 @@ func ResolveDefaults(agents map[string]AgentConfig, dataDir string) {
 	for name, cfg := range agents {
 		if cfg.DataDir == "" {
 			cfg.DataDir = filepath.Join(dataDir, "agents", name)
+		}
+		// Normalize allowed_dirs entries.
+		for i, d := range cfg.AllowedDirs {
+			cfg.AllowedDirs[i].Path = filepath.Clean(d.Path)
+			if !filepath.IsAbs(cfg.AllowedDirs[i].Path) {
+				// Best-effort: make relative paths absolute from CWD.
+				if abs, err := filepath.Abs(cfg.AllowedDirs[i].Path); err == nil {
+					cfg.AllowedDirs[i].Path = abs
+				}
+			}
+			if cfg.AllowedDirs[i].Mode == "" {
+				cfg.AllowedDirs[i].Mode = "ro"
+			}
 		}
 		agents[name] = cfg
 	}

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 func TestSafePath(t *testing.T) {
@@ -142,6 +144,157 @@ func TestSafePathForWrite(t *testing.T) {
 		}
 		if !errors.Is(err, ErrPathTraversal) {
 			t.Errorf("safePathForWrite() error = %v, want ErrPathTraversal", err)
+		}
+	})
+}
+
+func TestSafePathForRead(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	dataDir := t.TempDir()
+	allowedRO := t.TempDir()
+	allowedRW := t.TempDir()
+
+	// Resolve symlinks for macOS /var → /private/var.
+	wsResolved, _ := filepath.EvalSymlinks(workspace)
+	ddResolved, _ := filepath.EvalSymlinks(dataDir)
+	roResolved, _ := filepath.EvalSymlinks(allowedRO)
+	rwResolved, _ := filepath.EvalSymlinks(allowedRW)
+
+	// Create files in each directory.
+	for dir, name := range map[string]string{
+		workspace: "ws.txt",
+		dataDir:   "data.txt",
+		allowedRO: "ro.txt",
+		allowedRW: "rw.txt",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("ok"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedRO, Mode: security.PathAccessRO},
+			{Path: allowedRW, Mode: security.PathAccessRW},
+		},
+	})
+
+	t.Run("workspace has priority", func(t *testing.T) {
+		t.Parallel()
+		got, err := SafePathForRead(workspace, dataDir, "ws.txt", filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != wsResolved {
+			t.Errorf("expected workspace path %s, got %s", wsResolved, got)
+		}
+	})
+
+	t.Run("fallback to dataDir", func(t *testing.T) {
+		t.Parallel()
+		got, err := SafePathForRead(workspace, dataDir, filepath.Join(dataDir, "data.txt"), filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != ddResolved {
+			t.Errorf("expected dataDir path %s, got %s", ddResolved, got)
+		}
+	})
+
+	t.Run("fallback to filter RO", func(t *testing.T) {
+		t.Parallel()
+		got, err := SafePathForRead(workspace, dataDir, filepath.Join(allowedRO, "ro.txt"), filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != roResolved {
+			t.Errorf("expected allowedRO path %s, got %s", roResolved, got)
+		}
+	})
+
+	t.Run("fallback to filter RW", func(t *testing.T) {
+		t.Parallel()
+		got, err := SafePathForRead(workspace, dataDir, filepath.Join(allowedRW, "rw.txt"), filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != rwResolved {
+			t.Errorf("expected allowedRW path %s, got %s", rwResolved, got)
+		}
+	})
+
+	t.Run("nil filter behaves like before", func(t *testing.T) {
+		t.Parallel()
+		_, err := SafePathForRead(workspace, dataDir, "/some/random/path", nil)
+		if err == nil {
+			t.Error("expected error with nil filter and path outside workspace/dataDir")
+		}
+	})
+
+	t.Run("reject path outside everything", func(t *testing.T) {
+		t.Parallel()
+		_, err := SafePathForRead(workspace, dataDir, "/nonexistent/path/file.txt", filter)
+		if err == nil {
+			t.Error("expected error for path outside all allowed locations")
+		}
+	})
+}
+
+func TestSafePathForWriteFiltered(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	allowedRO := t.TempDir()
+	allowedRW := t.TempDir()
+
+	rwResolved, _ := filepath.EvalSymlinks(allowedRW)
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedRO, Mode: security.PathAccessRO},
+			{Path: allowedRW, Mode: security.PathAccessRW},
+		},
+	})
+
+	t.Run("workspace has priority", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		wsResolved, _ := filepath.EvalSymlinks(ws)
+		got, err := safePathForWriteFiltered(ws, "newfile.txt", filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != wsResolved {
+			t.Errorf("expected workspace path %s, got %s", wsResolved, got)
+		}
+	})
+
+	t.Run("RW dir allowed", func(t *testing.T) {
+		t.Parallel()
+		got, err := safePathForWriteFiltered(workspace, filepath.Join(allowedRW, "output.txt"), filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if filepath.Dir(got) != rwResolved {
+			t.Errorf("expected allowedRW path %s, got %s", rwResolved, got)
+		}
+	})
+
+	t.Run("RO dir rejected for write", func(t *testing.T) {
+		t.Parallel()
+		_, err := safePathForWriteFiltered(workspace, filepath.Join(allowedRO, "output.txt"), filter)
+		if err == nil {
+			t.Error("expected error: writing to RO directory should be rejected")
+		}
+	})
+
+	t.Run("nil filter same as before", func(t *testing.T) {
+		t.Parallel()
+		_, err := safePathForWriteFiltered(workspace, "/random/path/file.txt", nil)
+		if err == nil {
+			t.Error("expected error with nil filter and path outside workspace")
 		}
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/provider"
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
 )
 
@@ -53,6 +54,15 @@ func (e *ToolExecutor) ToolDefinitions() []provider.ToolDefinition {
 // Workspace returns the working directory configured for tool execution.
 func (e *ToolExecutor) Workspace() string {
 	return e.env.Workspace
+}
+
+// AllowedDirs returns the allowed directories configured for the agent.
+// Returns nil if no PathFilter is configured.
+func (e *ToolExecutor) AllowedDirs() []security.AllowedDir {
+	if e.env.PathFilter == nil {
+		return nil
+	}
+	return e.env.PathFilter.Dirs()
 }
 
 // Execute runs all tool calls in parallel and returns results in input order.

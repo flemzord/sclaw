@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
 )
 
@@ -138,5 +139,69 @@ func TestWriteFileTool_Interface(t *testing.T) {
 	}
 	if len(wt.Scopes()) == 0 {
 		t.Error("Scopes() should return at least one scope")
+	}
+}
+
+func TestWriteFile_AllowedDirRW(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	allowedRW := t.TempDir()
+	wt := &writeFileTool{}
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedRW, Mode: security.PathAccessRW},
+		},
+	})
+	env := tool.ExecutionEnv{Workspace: workspace, PathFilter: filter}
+
+	content := "written to allowed dir"
+	args, _ := json.Marshal(writeFileArgs{
+		Path:    filepath.Join(allowedRW, "output.txt"),
+		Content: content,
+	})
+	out, err := wt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.IsError {
+		t.Fatalf("unexpected tool error: %s", out.Content)
+	}
+
+	// Verify the file was actually written.
+	data, err := os.ReadFile(filepath.Join(allowedRW, "output.txt"))
+	if err != nil {
+		t.Fatalf("reading written file: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("content = %q, want %q", string(data), content)
+	}
+}
+
+func TestWriteFile_AllowedDirROBlocked(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	allowedRO := t.TempDir()
+	wt := &writeFileTool{}
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedRO, Mode: security.PathAccessRO},
+		},
+	})
+	env := tool.ExecutionEnv{Workspace: workspace, PathFilter: filter}
+
+	args, _ := json.Marshal(writeFileArgs{
+		Path:    filepath.Join(allowedRO, "forbidden.txt"),
+		Content: "should not write",
+	})
+	out, err := wt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.IsError {
+		t.Error("expected tool error: writing to RO allowed dir should be blocked")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flemzord/sclaw/internal/provider"
+	"github.com/flemzord/sclaw/internal/security"
 )
 
 // Sentinel errors for agent loop termination.
@@ -47,6 +48,15 @@ func (l *Loop) Workspace() string {
 		return ""
 	}
 	return l.executor.Workspace()
+}
+
+// AllowedDirs returns the allowed directories configured for the agent.
+// Returns nil if the executor is not set or no PathFilter is configured.
+func (l *Loop) AllowedDirs() []security.AllowedDir {
+	if l.executor == nil {
+		return nil
+	}
+	return l.executor.AllowedDirs()
 }
 
 // buildInitialMessages assembles the initial message history from the request.

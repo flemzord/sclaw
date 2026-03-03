@@ -147,6 +147,19 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 		toolReg.SetRateLimiter(f.cfg.RateLimiter)
 	}
 
+	// Build path filter for allowed directories outside workspace.
+	var pathFilter *security.PathFilter
+	if len(agentCfg.AllowedDirs) > 0 {
+		dirs := make([]security.AllowedDir, len(agentCfg.AllowedDirs))
+		for i, d := range agentCfg.AllowedDirs {
+			dirs[i] = security.AllowedDir{
+				Path: d.Path,
+				Mode: security.PathAccessMode(d.Mode),
+			}
+		}
+		pathFilter = security.NewPathFilter(security.PathFilterConfig{AllowedDirs: dirs})
+	}
+
 	// Build executor.
 	executor := agent.NewToolExecutor(agent.ToolExecutorConfig{
 		Registry: toolReg,
@@ -155,6 +168,7 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 			DataDir:      agentCfg.DataDir,
 			SanitizedEnv: f.cfg.SanitizedEnv,
 			URLFilter:    f.cfg.URLFilter,
+			PathFilter:   pathFilter,
 		},
 	})
 

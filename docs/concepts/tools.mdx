@@ -80,9 +80,12 @@ Each `ToolDefinition` contains:
 Tool definitions are computed at request time, not cached. This means tools registered after startup (e.g., via plugins) are automatically available on the next message.
 </Tip>
 
-### Workspace Context
+### Workspace & Directory Context
 
-In addition to tool definitions, the pipeline injects the agent's **workspace directory path** into the system prompt (Step 9c). This tells the LLM where file operations and command execution happen, so it can confidently resolve both relative and absolute paths.
+In addition to tool definitions, the pipeline injects directory context into the system prompt:
+
+- **Step 9c** — The agent's **workspace directory path**, so the LLM knows where file operations and command execution happen.
+- **Step 9d** — Any **allowed directories** configured via `allowed_dirs`, with their access mode (read-only or read-write). This tells the LLM which external directories it can access using absolute paths.
 
 Without this context, the LLM would see tools described as operating "in the workspace" but would have no way to know what that workspace is — leading it to refuse absolute path requests.
 
@@ -96,6 +99,7 @@ Each tool execution receives an `ExecutionEnv` with:
 | `DataDir` | Agent's persistent data directory. |
 | `SanitizedEnv` | Environment variables with secrets stripped. |
 | `URLFilter` | Domain allow/deny list for network requests. |
+| `PathFilter` | Allowed directories outside workspace (RO/RW). |
 | `ApprovalRequester` | Interface to request user approval if needed. |
 
 <Warning>

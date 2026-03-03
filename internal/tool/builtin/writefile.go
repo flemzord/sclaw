@@ -14,8 +14,12 @@ const maxWriteSize = 1 << 20
 
 type writeFileTool struct{}
 
-func (t *writeFileTool) Name() string        { return "write_file" }
-func (t *writeFileTool) Description() string { return "Write content to a file in the workspace." }
+func (t *writeFileTool) Name() string { return "write_file" }
+
+func (t *writeFileTool) Description() string {
+	return "Write content to a file in the workspace or read-write allowed directories."
+}
+
 func (t *writeFileTool) Scopes() []tool.Scope {
 	return []tool.Scope{tool.ScopeReadWrite}
 }
@@ -28,7 +32,7 @@ func (t *writeFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "File path (relative to workspace or absolute within it)."},
+			"path": {"type": "string", "description": "File path (relative to workspace, or absolute within workspace/read-write allowed directories)."},
 			"content": {"type": "string", "description": "Content to write to the file."}
 		},
 		"required": ["path", "content"]
@@ -53,7 +57,7 @@ func (t *writeFileTool) Execute(_ context.Context, args json.RawMessage, env too
 		}, nil
 	}
 
-	resolved, err := safePathForWrite(env.Workspace, a.Path)
+	resolved, err := safePathForWriteFiltered(env.Workspace, a.Path, env.PathFilter)
 	if err != nil {
 		return tool.Output{Content: fmt.Sprintf("path error: %v", err), IsError: true}, nil
 	}

@@ -48,7 +48,7 @@ The `exec` tool does **not** run inside a Docker sandbox by default. Enable sand
 
 ## read_file
 
-Read the contents of a file in the workspace.
+Read the contents of a file in the workspace, data directory, or allowed directories.
 
 | Property | Value |
 |----------|-------|
@@ -65,28 +65,33 @@ Read the contents of a file in the workspace.
 
 ### Behavior
 
-- Paths can be relative (resolved against workspace) or absolute (must be within workspace)
-- Symlinks are resolved — a symlink pointing outside the workspace is rejected
+- Paths can be relative (resolved against workspace) or absolute
+- Resolution order: workspace → data directory → allowed directories (RO or RW)
+- Symlinks are resolved — a symlink pointing outside all allowed boundaries is rejected
 - Directories are rejected (use `exec` with `ls` instead)
 - Files larger than 1 MiB are rejected to avoid blowing up the LLM context window
 
 ### Path Safety
 
-All path operations go through `SafePath`, which:
+All path operations go through `SafePathForRead`, which tries each location in order:
 
-1. Cleans the path (`filepath.Clean`)
-2. Resolves relative paths against the workspace
-3. Follows symlinks (`filepath.EvalSymlinks`)
-4. Verifies the resolved path stays under the workspace root
-5. Delegates to `security.ValidatePath` to block `/proc`, `/sys`, `/dev`
+1. **Workspace** — `SafePath` cleans the path, resolves symlinks, verifies containment
+2. **Data directory** — same checks, for the agent's persistent data directory
+3. **Allowed directories** — resolves the absolute path, validates via `security.ValidatePath`, then checks `PathFilter.CheckRead` (RO or RW)
+
+Each step includes:
+- Path cleaning (`filepath.Clean`)
+- Symlink resolution (`filepath.EvalSymlinks`)
+- Separator-aware prefix comparison to prevent `/data` matching `/data-staging`
+- `security.ValidatePath` to block `/proc`, `/sys`, `/dev`
 
 <Note>
-The workspace boundary check uses a separator-aware prefix comparison (`workspace + "/"`) to prevent a workspace named `/data` from accidentally matching `/data-staging`.
+The `PathFilter` resolves symlinks on configured directory paths at creation time. This ensures consistent matching on systems where paths like `/var` are symlinks to `/private/var` (macOS).
 </Note>
 
 ## write_file
 
-Write content to a file in the workspace.
+Write content to a file in the workspace or read-write allowed directories.
 
 | Property | Value |
 |----------|-------|
@@ -104,10 +109,11 @@ Write content to a file in the workspace.
 
 ### Behavior
 
+- Resolution order: workspace → allowed directories (RW only)
 - Creates parent directories automatically (`os.MkdirAll` with `0755`)
 - Writes files with `0644` permissions
 - Content larger than 1 MiB is rejected
-- Same path safety checks as `read_file`
+- Read-only allowed directories are never writable — only `rw` directories accept writes
 
 ### Examples
 
@@ -121,7 +127,8 @@ All three built-in tools enforce consistent security boundaries:
 
 | Protection | Mechanism |
 |-----------|-----------|
-| **Path traversal** | `SafePath` rejects `../` escape, symlinks pointing outside workspace, and absolute paths outside workspace |
+| **Path traversal** | `SafePath` rejects `../` escape, symlinks pointing outside workspace, and absolute paths outside allowed boundaries |
+| **Directory access control** | `PathFilter` enforces per-directory RO/RW permissions for `read_file` and `write_file` |
 | **System paths** | `security.ValidatePath` blocks `/proc`, `/sys`, `/dev` |
 | **Secret leakage** | `exec` uses `SanitizedEnv` — API keys, tokens, and credentials are stripped |
 | **Resource limits** | 1 MiB cap on file reads, file writes, and command output |
@@ -161,6 +168,6 @@ Built-in tools are automatically advertised to the LLM on every request. During 
 
 This means the LLM knows about `exec`, `read_file`, and `write_file` and can call them during the ReAct reasoning loop. No additional configuration is needed — registering a tool is sufficient for it to appear in the LLM's tool list.
 
-The pipeline also injects the **workspace directory path** into the system prompt (Step 9c), so the LLM knows the absolute path of its working directory and can resolve user-provided paths correctly.
+The pipeline also injects directory context into the system prompt: the **workspace directory path** (Step 9c) and any **allowed directories** with their access modes (Step 9d). This lets the LLM know exactly which directories it can access and whether they are read-only or read-write.
 
 See [Tools](/concepts/tools#tool-advertisement-to-the-llm) for details on how tool definitions flow through the system.

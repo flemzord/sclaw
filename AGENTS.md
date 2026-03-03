@@ -127,6 +127,7 @@ sclaw implements defense-in-depth security across the entire message pipeline:
 | Subprocess sanitization | `SanitizedEnv()` strips sensitive env vars before `syscall.Exec` | `internal/security/env.go` |
 | Tool sandboxing | Docker-based execution with resource limits for exec/read_write scopes | `internal/security/sandbox.go` |
 | URL filtering | Default-deny domain allow/deny lists for network tools | `internal/security/urlfilter.go` |
+| Path filtering | Per-agent `allowed_dirs` with RO/RW access for read_file/write_file | `internal/security/pathfilter.go` |
 | Audit logging | JSONL audit trail covering messages, tool calls, auth, config changes | `internal/security/audit.go` |
 | Session isolation | Lane locks + cross-session ParentID validation | `internal/router/`, `internal/subagent/` |
 | Auth middleware | Bearer + Basic auth with constant-time comparison | `internal/gateway/auth.go` |

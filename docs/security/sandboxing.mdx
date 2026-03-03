@@ -76,6 +76,34 @@ if err := security.ValidatePath(requestedPath); err != nil {
 
 This prevents tools from reading sensitive system information like process memory maps, kernel parameters, or other system files.
 
+### Path Filtering (allowed_dirs)
+
+In addition to workspace containment and system path blocking, sclaw supports per-agent `allowed_dirs` for fine-grained directory access outside the workspace.
+
+```yaml
+agents:
+  coder:
+    workspace: "/tmp/scratch"
+    allowed_dirs:
+      - path: "/home/user/projects/myapp"
+        mode: "ro"
+      - path: "/home/user/output"
+        mode: "rw"
+```
+
+The `PathFilter` enforces two access levels:
+
+| Mode | `read_file` | `write_file` |
+|------|-------------|--------------|
+| `ro` | Allowed | Blocked |
+| `rw` | Allowed | Allowed |
+
+Path resolution uses symlink-aware comparison: directory paths are resolved through `EvalSymlinks` at filter creation time, and file paths are resolved before checking. This prevents symlink-based escapes (e.g., `/var` → `/private/var` on macOS).
+
+<Tip>
+Use `allowed_dirs` instead of widening the workspace. A workspace of `"/"` gives the agent unrestricted access to the entire filesystem — `allowed_dirs` provides surgical, per-directory control.
+</Tip>
+
 ## URL Filtering
 
 Network tools are subject to domain-based URL filtering with a **default-deny** policy.

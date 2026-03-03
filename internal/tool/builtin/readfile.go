@@ -17,7 +17,7 @@ type readFileTool struct{}
 func (t *readFileTool) Name() string { return "read_file" }
 
 func (t *readFileTool) Description() string {
-	return "Read the contents of a file in the workspace or data directory."
+	return "Read the contents of a file in the workspace, data directory, or allowed directories."
 }
 
 func (t *readFileTool) Scopes() []tool.Scope {
@@ -32,7 +32,7 @@ func (t *readFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "File path (relative to workspace, or absolute within workspace/data directory)."}
+			"path": {"type": "string", "description": "File path (relative to workspace, or absolute within workspace/data directory/allowed directories)."}
 		},
 		"required": ["path"]
 	}`)
@@ -48,10 +48,7 @@ func (t *readFileTool) Execute(_ context.Context, args json.RawMessage, env tool
 		return tool.Output{Content: fmt.Sprintf("invalid arguments: %v", err), IsError: true}, nil
 	}
 
-	resolved, err := SafePath(env.Workspace, a.Path)
-	if err != nil && env.DataDir != "" {
-		resolved, err = SafePath(env.DataDir, a.Path)
-	}
+	resolved, err := SafePathForRead(env.Workspace, env.DataDir, a.Path, env.PathFilter)
 	if err != nil {
 		return tool.Output{Content: fmt.Sprintf("path error: %v", err), IsError: true}, nil
 	}

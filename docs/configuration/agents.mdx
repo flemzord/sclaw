@@ -12,6 +12,7 @@ The `agents` section enables multi-agent mode. Each key is an agent name, and it
 |-------|------|---------|-------------|
 | `data_dir` | string | `{DataDir}/agents/{name}` | Persistent data directory for this agent. |
 | `workspace` | string | — | Working directory for tool execution. |
+| `allowed_dirs` | list | — | Additional directories accessible outside the workspace. |
 | `provider` | string | — | Module ID of the provider to use (must exist in `modules`). |
 | `tools` | list | — | Tool names available to this agent. |
 | `exclude_skills` | list | — | Global skill names to exclude for this agent. |
@@ -70,6 +71,64 @@ agents:
     streaming: false
 ```
 
+## Allowed Directories
+
+By default, `read_file` and `write_file` can only access files inside the agent's `workspace`. The `allowed_dirs` field grants access to additional directories outside the workspace with granular permissions.
+
+Each entry specifies a `path` and a `mode`:
+
+| Mode | Description |
+|------|-------------|
+| `ro` | Read-only access (default). The agent can read files but not write. |
+| `rw` | Read-write access. The agent can both read and write files. |
+
+```yaml
+agents:
+  coder:
+    workspace: "/tmp/agent-scratch"
+    allowed_dirs:
+      - path: "/home/user/projects/monrepo"
+        mode: "ro"
+      - path: "/home/user/documents"
+        mode: "rw"
+```
+
+In this configuration, the agent can:
+- Read and write freely in `/tmp/agent-scratch` (workspace)
+- Read files in `/home/user/projects/monrepo` (read-only)
+- Read and write files in `/home/user/documents` (read-write)
+
+<Warning>
+Without `allowed_dirs`, giving an agent access to files outside its workspace requires setting `workspace: "/"` — which is a security risk. Use `allowed_dirs` instead for fine-grained access control.
+</Warning>
+
+<Note>
+The `exec` tool is not affected by `allowed_dirs` — it always runs with `cwd` set to the workspace. Shell commands can naturally access any path the OS allows. `allowed_dirs` only controls `read_file` and `write_file`.
+</Note>
+
+### Directory Access Model
+
+sclaw uses three directory levels per agent:
+
+| Directory | Access | Purpose |
+|-----------|--------|---------|
+| `workspace` | Full read-write (tools + exec cwd) | Sandbox for the agent's work |
+| `allowed_dirs` | RO or RW per entry (read_file / write_file only) | Controlled access to external directories |
+| `data_dir` | Internal only (not exposed to tools) | SOUL.md, skills/, memory storage |
+
+### Path Resolution Order
+
+When `read_file` resolves a path, it tries locations in this order:
+
+1. **Workspace** — relative and absolute paths within the workspace
+2. **Data directory** — absolute paths within the data directory
+3. **Allowed directories** — absolute paths within any allowed directory (RO or RW)
+
+When `write_file` resolves a path:
+
+1. **Workspace** — relative and absolute paths within the workspace
+2. **Allowed directories** — absolute paths within RW directories only
+
 ## Single-Agent Mode
 
 When the `agents` section is omitted entirely, sclaw runs in single-agent mode:
@@ -105,7 +164,12 @@ agents:
 
   coder:
     provider: "provider.openai_compatible"
-    workspace: "/home/user/projects"
+    workspace: "/tmp/coder-scratch"
+    allowed_dirs:
+      - path: "/home/user/projects"
+        mode: "ro"
+      - path: "/home/user/output"
+        mode: "rw"
     tools: ["exec", "read_file", "write_file"]
     memory:
       enabled: true
@@ -118,7 +182,7 @@ agents:
 
 In this setup:
 - **main** handles all Telegram messages by default
-- **coder** takes over when user `123456789` sends a message, with access to code execution tools and a longer iteration limit
+- **coder** takes over when user `123456789` sends a message, with a sandboxed workspace, read-only access to the source code, and a separate output directory
 
 <Note>
 Each agent gets its own data directory, SOUL.md personality file, skills directory, and (optionally) its own SQLite memory database. See [Agent Personality](/concepts/soul), [Skills](/concepts/skills), and [Memory System](/concepts/memory) for details.

@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -239,6 +240,22 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		systemPrompt += "\n\nYour workspace directory is: " + ws +
 			"\nAll file operations (read_file, write_file) and command execution (exec) operate within this directory. " +
 			"You can use both relative and absolute paths as long as they resolve within this workspace."
+	}
+
+	// Step 9d: Allowed directories — tell the LLM about directories outside
+	// the workspace that it can access via read_file / write_file.
+	if dirs := loop.AllowedDirs(); len(dirs) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n\nYou also have access to these directories outside the workspace:")
+		for _, d := range dirs {
+			mode := "read-only"
+			if d.Mode == security.PathAccessRW {
+				mode = "read-write"
+			}
+			fmt.Fprintf(&sb, "\n- %s (%s)", d.Path, mode)
+		}
+		sb.WriteString("\nUse absolute paths to access files in these directories.")
+		systemPrompt += sb.String()
 	}
 
 	req := agent.Request{

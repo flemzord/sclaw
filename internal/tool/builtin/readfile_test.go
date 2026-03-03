@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/tool"
 )
 
@@ -182,5 +183,62 @@ func TestReadFile_DataDirEmpty(t *testing.T) {
 	}
 	if !out.IsError {
 		t.Error("expected tool error when DataDir is empty and path is outside workspace")
+	}
+}
+
+func TestReadFile_AllowedDirRO(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	allowedDir := t.TempDir()
+	rt := &readFileTool{}
+
+	content := "allowed dir content"
+	if err := os.WriteFile(filepath.Join(allowedDir, "project.go"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedDir, Mode: security.PathAccessRO},
+		},
+	})
+	env := tool.ExecutionEnv{Workspace: workspace, PathFilter: filter}
+
+	args, _ := json.Marshal(readFileArgs{Path: filepath.Join(allowedDir, "project.go")})
+	out, err := rt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.IsError {
+		t.Fatalf("unexpected tool error: %s", out.Content)
+	}
+	if out.Content != content {
+		t.Errorf("content = %q, want %q", out.Content, content)
+	}
+}
+
+func TestReadFile_AllowedDirTraversalBlocked(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	allowedDir := t.TempDir()
+	rt := &readFileTool{}
+
+	filter := security.NewPathFilter(security.PathFilterConfig{
+		AllowedDirs: []security.AllowedDir{
+			{Path: allowedDir, Mode: security.PathAccessRO},
+		},
+	})
+	env := tool.ExecutionEnv{Workspace: workspace, PathFilter: filter}
+
+	// Attempt to read a file that is NOT in any allowed location.
+	args, _ := json.Marshal(readFileArgs{Path: "/etc/passwd"})
+	out, err := rt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.IsError {
+		t.Error("expected tool error for path outside workspace and allowed dirs")
 	}
 }
