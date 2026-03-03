@@ -115,6 +115,40 @@ modules:
 Without `memory.sqlite`, conversation history is kept in memory only and lost on restart. Without `agents`, sclaw runs in single-agent mode using the first available provider.
 </Note>
 
+## With 1Password
+
+The same minimal configuration using 1Password secret references instead of environment variables:
+
+```yaml
+version: "1"
+
+modules:
+  channel.telegram:
+    token: "op://Private/mybot/telegram-token"
+  provider.openai_compatible:
+    base_url: "https://api.openai.com/v1"
+    api_key: "op://Private/mybot/openai-api-key"
+    model: "gpt-4o"
+    context_window: 128000
+```
+
+You can mix both syntaxes in the same file:
+
+```yaml
+modules:
+  channel.telegram:
+    token: "op://Private/mybot/telegram-token"
+  provider.openai_compatible:
+    base_url: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+    api_key: "op://Private/mybot/openai-api-key"
+    model: "gpt-4o"
+    context_window: 128000
+```
+
+<Note>
+Environment variables (`${VAR}`) are expanded first, then `op://` references are resolved. This means you can use env vars inside `op://` paths if needed.
+</Note>
+
 ## Environment Variables
 
 This example uses the following environment variables:

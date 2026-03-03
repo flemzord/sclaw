@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +146,45 @@ func TestExpandEnv_MultipleErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "MISS_B_99") {
 		t.Errorf("error should mention MISS_B_99: %v", err)
+	}
+}
+
+func TestLoad_WithOnePasswordExpansion(t *testing.T) {
+	orig := opRunnerFunc
+	defer func() { opRunnerFunc = orig }()
+
+	opRunnerFunc = func(ref string) (string, error) {
+		if ref == "op://Private/sclaw/test-key" {
+			return "op_resolved_value", nil
+		}
+		return "", fmt.Errorf("unexpected ref: %s", ref)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `version: "1"
+modules:
+  test.mod:
+    key: "op://Private/sclaw/test-key"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	node := cfg.Modules["test.mod"]
+	var parsed struct {
+		Key string `yaml:"key"`
+	}
+	if err := node.Decode(&parsed); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if parsed.Key != "op_resolved_value" {
+		t.Errorf("key = %q, want %q", parsed.Key, "op_resolved_value")
 	}
 }
 

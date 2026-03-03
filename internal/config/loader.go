@@ -13,15 +13,21 @@ import (
 var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-((?:[^}\\]|\\.)*))?\}`)
 
 // LoadFromBytes validates raw YAML configuration bytes without reading from disk.
-// It expands environment variables and parses the result into a Config struct.
+// It expands environment variables, resolves 1Password references, and parses
+// the result into a Config struct.
 func LoadFromBytes(raw []byte) (*Config, error) {
 	expanded, err := expandEnv(raw)
 	if err != nil {
 		return nil, fmt.Errorf("config: expanding variables: %w", err)
 	}
 
+	resolved, err := resolveOnePassword(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("config: resolving 1password secrets: %w", err)
+	}
+
 	var cfg Config
-	if err := yaml.Unmarshal(expanded, &cfg); err != nil {
+	if err := yaml.Unmarshal(resolved, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parsing yaml: %w", err)
 	}
 
@@ -41,8 +47,13 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: expanding variables in %s: %w", path, err)
 	}
 
+	resolved, err := resolveOnePassword(expanded)
+	if err != nil {
+		return nil, fmt.Errorf("config: resolving 1password secrets in %s: %w", path, err)
+	}
+
 	var cfg Config
-	if err := yaml.Unmarshal(expanded, &cfg); err != nil {
+	if err := yaml.Unmarshal(resolved, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parsing %s: %w", path, err)
 	}
 

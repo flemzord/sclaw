@@ -49,6 +49,29 @@ modules:
 Required variables (without defaults) cause a hard failure at startup if unset. This is intentional — it prevents running with missing credentials.
 </Warning>
 
+## 1Password Secret References
+
+sclaw can resolve secrets directly from 1Password using `op://` references. This requires the [1Password CLI (`op`)](https://developer.1password.com/docs/cli/) to be installed and authenticated.
+
+| Syntax | Description |
+|--------|-------------|
+| `op://vault/item/field` | Standard 3-segment reference |
+| `op://vault/item/section/field` | Reference with section qualifier |
+
+```yaml
+modules:
+  channel.telegram:
+    token: "op://Private/sclaw/telegram-token"
+  provider.openai_compatible:
+    api_key: "op://Private/sclaw/openai-api-key"
+```
+
+References are resolved at config load time via `op read`. Each unique reference is resolved once (deduplicated), and resolution happens after environment variable expansion — so `${VAR}` and `op://` syntaxes can coexist in the same file.
+
+<Note>
+If `op://` references are present but the `op` CLI is not found in `$PATH`, loading fails with a clear error. If no `op://` references exist, the CLI is not required.
+</Note>
+
 ## Top-Level Structure
 
 The configuration file has five top-level keys:
