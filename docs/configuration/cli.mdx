@@ -1,0 +1,80 @@
+---
+title: CLI Reference
+description: "sclaw command-line interface"
+icon: "terminal"
+---
+
+## Commands
+
+### `sclaw init`
+
+Interactive wizard that generates a working configuration file.
+
+```bash
+sclaw init
+```
+
+The wizard walks through three steps:
+
+1. **Channel** — Telegram bot token, polling/webhook mode, allowed users
+2. **Provider** — Preset selection (OpenAI, Anthropic, Ollama, Custom) with editable defaults
+3. **Agent & Workspace** — Data directory, workspace, SQLite memory, SOUL.md template
+
+The generated file is written to `~/.config/sclaw/sclaw.yaml` (respects `XDG_CONFIG_HOME`). If the file already exists, the wizard asks for confirmation before overwriting.
+
+#### Provider Presets
+
+| Preset | Base URL | API Key Env | Model | Context Window |
+|--------|----------|-------------|-------|----------------|
+| OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-4o` | 128,000 |
+| Anthropic | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` | 200,000 |
+| Ollama | `http://localhost:11434/v1` | *(none)* | `llama3` | 8,192 |
+| Custom | *(empty)* | *(empty)* | *(empty)* | 4,096 |
+
+All preset values are editable in the second form step.
+
+<Note>
+Secrets are never stored in the configuration file. The wizard uses environment variable references (`${TELEGRAM_BOT_TOKEN}`, `api_key_env: OPENAI_API_KEY`) so that actual values are resolved at runtime.
+</Note>
+
+---
+
+### `sclaw start`
+
+Start sclaw with all configured modules.
+
+```bash
+sclaw start [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-c`, `--config` | Path to configuration file (auto-discovered if omitted) |
+| `--debug` | Enable debug logging |
+
+Configuration is auto-discovered in this order:
+1. `$XDG_CONFIG_HOME/sclaw/sclaw.yaml`
+2. `~/.config/sclaw/sclaw.yaml`
+3. `./sclaw.yaml`
+
+---
+
+### `sclaw config check`
+
+Validate a configuration file without starting sclaw.
+
+```bash
+sclaw config check [path]
+```
+
+If no path is provided, the file is auto-discovered using the same logic as `sclaw start`.
+
+---
+
+### `sclaw version`
+
+Print version, build info, and compiled modules.
+
+```bash
+sclaw version
+```

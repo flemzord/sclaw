@@ -44,6 +44,7 @@
             "icon": "gear",
             "pages": [
               "configuration/overview",
+              "configuration/cli",
               "configuration/modules",
               "configuration/agents",
               "configuration/security",

@@ -28,7 +28,19 @@ To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot).
 
 ### Create the Configuration File
 
-Create `sclaw.yaml` in your working directory:
+The fastest way to generate a configuration is with the interactive wizard:
+
+```bash
+sclaw init
+```
+
+The wizard guides you through channel setup, provider selection (OpenAI, Anthropic, Ollama, or custom), and workspace configuration. It writes the result to `~/.config/sclaw/sclaw.yaml`.
+
+<Tip>
+See the [CLI reference](/configuration/cli) for all available commands.
+</Tip>
+
+Alternatively, create `sclaw.yaml` manually in your working directory:
 
 ```yaml sclaw.yaml
 version: "1"
