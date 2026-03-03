@@ -12,6 +12,22 @@ import (
 // envPattern matches ${VAR} and ${VAR:-default} expressions.
 var envPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-((?:[^}\\]|\\.)*))?\}`)
 
+// LoadFromBytes validates raw YAML configuration bytes without reading from disk.
+// It expands environment variables and parses the result into a Config struct.
+func LoadFromBytes(raw []byte) (*Config, error) {
+	expanded, err := expandEnv(raw)
+	if err != nil {
+		return nil, fmt.Errorf("config: expanding variables: %w", err)
+	}
+
+	var cfg Config
+	if err := yaml.Unmarshal(expanded, &cfg); err != nil {
+		return nil, fmt.Errorf("config: parsing yaml: %w", err)
+	}
+
+	return &cfg, nil
+}
+
 // Load reads a YAML configuration file, expands environment variables,
 // and parses it into a Config struct.
 func Load(path string) (*Config, error) {
