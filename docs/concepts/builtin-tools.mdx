@@ -1,0 +1,156 @@
+---
+title: Built-in Tools
+description: "exec, read_file, and write_file — the tools that ship with every agent"
+icon: "toolbox"
+---
+
+Every sclaw agent starts with three built-in tools registered in the global tool registry. These provide the baseline capabilities agents need to interact with the filesystem and execute commands.
+
+## exec
+
+Execute a shell command in the agent's workspace.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `exec` |
+| **Default policy** | `allow` |
+
+### Schema
+
+```json
+{
+  "command": "string (required)",
+  "timeout_seconds": "integer (optional, default 30, max 600)"
+}
+```
+
+### Behavior
+
+- Runs `sh -c <command>` with the working directory set to the agent's workspace
+- Uses `SanitizedEnv` — sensitive environment variables are stripped before execution
+- Captures stdout and stderr (capped at 1 MiB each)
+- Non-zero exit codes return `IsError: true` with stderr content so the agent can react
+- Commands that exceed the timeout are killed
+
+<Warning>
+The `exec` tool does **not** run inside a Docker sandbox by default. Enable sandboxing in the security configuration for production deployments where agents execute untrusted commands.
+</Warning>
+
+### Examples
+
+```json
+{"command": "gh issue list --limit 5"}
+```
+
+```json
+{"command": "remindctl add 'Review PR #42'", "timeout_seconds": 10}
+```
+
+## read_file
+
+Read the contents of a file in the workspace.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_only` |
+| **Default policy** | `allow` |
+
+### Schema
+
+```json
+{
+  "path": "string (required)"
+}
+```
+
+### Behavior
+
+- Paths can be relative (resolved against workspace) or absolute (must be within workspace)
+- Symlinks are resolved — a symlink pointing outside the workspace is rejected
+- Directories are rejected (use `exec` with `ls` instead)
+- Files larger than 1 MiB are rejected to avoid blowing up the LLM context window
+
+### Path Safety
+
+All path operations go through `SafePath`, which:
+
+1. Cleans the path (`filepath.Clean`)
+2. Resolves relative paths against the workspace
+3. Follows symlinks (`filepath.EvalSymlinks`)
+4. Verifies the resolved path stays under the workspace root
+5. Delegates to `security.ValidatePath` to block `/proc`, `/sys`, `/dev`
+
+<Note>
+The workspace boundary check uses a separator-aware prefix comparison (`workspace + "/"`) to prevent a workspace named `/data` from accidentally matching `/data-staging`.
+</Note>
+
+## write_file
+
+Write content to a file in the workspace.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_write` |
+| **Default policy** | `allow` |
+
+### Schema
+
+```json
+{
+  "path": "string (required)",
+  "content": "string (required)"
+}
+```
+
+### Behavior
+
+- Creates parent directories automatically (`os.MkdirAll` with `0755`)
+- Writes files with `0644` permissions
+- Content larger than 1 MiB is rejected
+- Same path safety checks as `read_file`
+
+### Examples
+
+```json
+{"path": "notes/standup.md", "content": "# Standup 2025-01-15\n- Reviewed PR #42\n- Fixed CI flake"}
+```
+
+## Security Guarantees
+
+All three built-in tools enforce consistent security boundaries:
+
+| Protection | Mechanism |
+|-----------|-----------|
+| **Path traversal** | `SafePath` rejects `../` escape, symlinks pointing outside workspace, and absolute paths outside workspace |
+| **System paths** | `security.ValidatePath` blocks `/proc`, `/sys`, `/dev` |
+| **Secret leakage** | `exec` uses `SanitizedEnv` — API keys, tokens, and credentials are stripped |
+| **Resource limits** | 1 MiB cap on file reads, file writes, and command output |
+| **Timeout** | `exec` defaults to 30s, capped at 10 minutes |
+
+## Approval Policies
+
+By default, all built-in tools use `allow` — they execute without prompting the user. Override this per-context in the configuration:
+
+```yaml
+security:
+  policy:
+    dm:
+      tools:
+        exec: ask        # Require approval for shell commands in DMs
+        write_file: ask  # Require approval for file writes in DMs
+    group:
+      default: deny      # Block all tools in group chats by default
+```
+
+See [Tools](/concepts/tools) for the full approval system documentation.
+
+## Registration
+
+Built-in tools are registered automatically during application startup via `builtin.RegisterAll()`. They are available to all agents through the global tool registry — no configuration required.
+
+```go
+// internal/tool/builtin/register.go
+func RegisterAll(registry *tool.Registry) error
+```
+
+To add a custom built-in tool, implement the `tool.Tool` interface and add it to the `RegisterAll` function.

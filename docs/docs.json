@@ -60,6 +60,7 @@
               "concepts/memory",
               "concepts/soul",
               "concepts/tools",
+              "concepts/builtin-tools",
               "concepts/routing",
               "concepts/context"
             ]

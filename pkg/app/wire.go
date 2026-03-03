@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
 
 	"github.com/flemzord/sclaw/internal/channel"
@@ -16,6 +17,7 @@ import (
 	"github.com/flemzord/sclaw/internal/security"
 	"github.com/flemzord/sclaw/internal/subagent"
 	"github.com/flemzord/sclaw/internal/tool"
+	"github.com/flemzord/sclaw/internal/tool/builtin"
 )
 
 // factoryCloser is implemented by multiagent.Factory to close SQLite databases.
@@ -132,16 +134,32 @@ func wireRouter(
 		historyStore, _ = svc.(memory.HistoryStore)
 	}
 
+	// Build the global tool registry with built-in tools.
+	globalTools := tool.NewRegistry()
+	if err := builtin.RegisterAll(globalTools); err != nil {
+		return fmt.Errorf("registering built-in tools: %w", err)
+	}
+
+	// Resolve sanitized environment for subprocess tools.
+	var sanitizedEnv []string
+	if svc, ok := appCtx.GetService("security.sanitized_env"); ok {
+		sanitizedEnv, _ = svc.([]string)
+	}
+
 	// Build the agent factory.
+	globalSkillsDir := filepath.Join(appCtx.DataDir, "skills")
+
 	factory := multiagent.NewFactory(multiagent.FactoryConfig{
 		Registry:        registry,
 		DefaultProvider: defaultProvider,
-		GlobalTools:     tool.NewRegistry(),
+		GlobalTools:     globalTools,
 		Logger:          logger,
 		AuditLogger:     auditLogger,
 		RateLimiter:     rateLimiter,
 		URLFilter:       urlFilter,
+		SanitizedEnv:    sanitizedEnv,
 		HistoryStore:    historyStore,
+		GlobalSkillsDir: globalSkillsDir,
 	})
 
 	// Create sub-agent manager and wire it into the factory.
@@ -162,6 +180,7 @@ func wireRouter(
 		RateLimiter:     rateLimiter,
 		HistoryResolver: factory,
 		SoulResolver:    factory,
+		SkillResolver:   factory,
 	})
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)
