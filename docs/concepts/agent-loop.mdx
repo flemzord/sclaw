@@ -22,11 +22,15 @@ graph TD
 
 Each iteration:
 
-1. **Reason** — The LLM receives the conversation history (system prompt + messages + tool results) and generates a response.
+1. **Reason** — The LLM receives the conversation history (system prompt + messages + tool results) along with the list of available tool definitions, and generates a response.
 2. **Check** — If the response contains no tool calls, the agent is done.
 3. **Guard** — Before executing, safety guards check for loops, budget exhaustion, and timeouts.
 4. **Act** — Tool calls are executed **in parallel** with panic recovery.
 5. **Observe** — Results are appended to the conversation and the cycle repeats.
+
+<Note>
+Tool definitions are injected into every LLM call via `req.Tools`. The pipeline populates this field by calling `loop.ToolDefinitions()`, which collects all tools from the registry. See [Tools](/concepts/tools#tool-advertisement-to-the-llm) for details.
+</Note>
 
 ## Guard System
 

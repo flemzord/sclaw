@@ -31,6 +31,15 @@ func NewLoop(p provider.Provider, executor *ToolExecutor, cfg LoopConfig) *Loop 
 	}
 }
 
+// ToolDefinitions returns provider-facing definitions from the executor's registry.
+// Returns nil if the executor is not set.
+func (l *Loop) ToolDefinitions() []provider.ToolDefinition {
+	if l.executor == nil {
+		return nil
+	}
+	return l.executor.ToolDefinitions()
+}
+
 // buildInitialMessages assembles the initial message history from the request.
 func buildInitialMessages(req Request) []provider.LLMMessage {
 	var messages []provider.LLMMessage

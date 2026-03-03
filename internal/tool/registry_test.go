@@ -384,6 +384,55 @@ func TestRegistryExecute_ContextAwarePolicy(t *testing.T) {
 	}
 }
 
+func TestRegistryToolDefinitions_ReturnsAllToolsSorted(t *testing.T) {
+	t.Parallel()
+
+	r := NewRegistry()
+
+	// Register tools in reverse alphabetical order.
+	tools := []registryTestTool{
+		{name: "write_file", scopes: []Scope{ScopeReadWrite}},
+		{name: "exec", scopes: []Scope{ScopeExec}},
+		{name: "read_file", scopes: []Scope{ScopeReadOnly}},
+	}
+	for _, tt := range tools {
+		if err := r.Register(tt); err != nil {
+			t.Fatalf("register %q: %v", tt.name, err)
+		}
+	}
+
+	defs := r.ToolDefinitions()
+
+	if len(defs) != 3 {
+		t.Fatalf("got %d definitions, want 3", len(defs))
+	}
+
+	// Must be sorted alphabetically.
+	wantNames := []string{"exec", "read_file", "write_file"}
+	for i, want := range wantNames {
+		if defs[i].Name != want {
+			t.Errorf("defs[%d].Name = %q, want %q", i, defs[i].Name, want)
+		}
+		if defs[i].Description != "registry test tool" {
+			t.Errorf("defs[%d].Description = %q, want %q", i, defs[i].Description, "registry test tool")
+		}
+		if string(defs[i].Parameters) != "{}" {
+			t.Errorf("defs[%d].Parameters = %s, want {}", i, defs[i].Parameters)
+		}
+	}
+}
+
+func TestRegistryToolDefinitions_EmptyRegistry(t *testing.T) {
+	t.Parallel()
+
+	r := NewRegistry()
+	defs := r.ToolDefinitions()
+
+	if len(defs) != 0 {
+		t.Fatalf("got %d definitions, want 0", len(defs))
+	}
+}
+
 // TestTruncateForAudit_UTF8Safety verifies that truncateForAudit does not split
 // a multi-byte UTF-8 character at the truncation boundary.
 func TestTruncateForAudit_UTF8Safety(t *testing.T) {

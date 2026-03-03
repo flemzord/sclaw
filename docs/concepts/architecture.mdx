@@ -86,7 +86,7 @@ graph TD
 | 7b | **History Restore** | For new sessions, restore conversation history from SQLite. |
 | 8 | **History Append** | Add the user message to session history. |
 | 8b | **Persistence** | Write user message to SQLite (write-behind, non-fatal). |
-| 9 | **Context Assembly** | Build the LLM request with system prompt (SOUL.md), history, and memory facts. |
+| 9 | **Context Assembly** | Build the LLM request with system prompt (SOUL.md), history, tool definitions, and memory facts. |
 | 9b | **Typing Indicator** | Show "typing..." indicator in the channel while processing. |
 | 10 | **Agent Loop** | Execute the ReAct reasoning loop. |
 | 11 | **Hook: before_send** | Run pre-send hooks on the outbound message. |

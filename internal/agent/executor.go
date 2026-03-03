@@ -45,6 +45,11 @@ func NewToolExecutor(cfg ToolExecutorConfig) *ToolExecutor {
 	}
 }
 
+// ToolDefinitions returns provider-facing definitions from the underlying registry.
+func (e *ToolExecutor) ToolDefinitions() []provider.ToolDefinition {
+	return e.registry.ToolDefinitions()
+}
+
 // Execute runs all tool calls in parallel and returns results in input order.
 // Panics in individual tools are recovered and reported as error outputs.
 func (e *ToolExecutor) Execute(ctx context.Context, calls []provider.ToolCall) []ToolCallRecord {

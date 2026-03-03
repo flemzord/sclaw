@@ -52,6 +52,34 @@ When a tool requires approval (`ask` policy), the pipeline:
 The approval manager uses a channel-based requester pattern — it sends the approval prompt through the same messaging channel (Telegram, Discord, etc.) that the user is interacting with.
 </Note>
 
+## Tool Advertisement to the LLM
+
+For the LLM to invoke tools, it must know they exist. The tool registry exposes a `ToolDefinitions()` method that converts all registered tools into the `ToolDefinition` format expected by provider APIs (OpenAI-compatible `tools` array).
+
+The definitions flow through the system in a chain:
+
+```mermaid
+graph LR
+    A["tool.Registry.ToolDefinitions()"] --> B["agent.ToolExecutor.ToolDefinitions()"]
+    B --> C["agent.Loop.ToolDefinitions()"]
+    C --> D["pipeline populates req.Tools"]
+    D --> E["provider.CompletionRequest.Tools"]
+```
+
+At **Step 9 (Context Assembly)** of the message pipeline, the router calls `loop.ToolDefinitions()` and injects the result into the `agent.Request`. The agent loop then forwards these definitions to the provider on every LLM call, enabling the model to reason about and invoke any registered tool.
+
+Each `ToolDefinition` contains:
+
+| Field | Source |
+|-------|--------|
+| `name` | `Tool.Name()` |
+| `description` | `Tool.Description()` |
+| `parameters` | `Tool.Schema()` (JSON Schema) |
+
+<Tip>
+Tool definitions are computed at request time, not cached. This means tools registered after startup (e.g., via plugins) are automatically available on the next message.
+</Tip>
+
 ## Execution Environment
 
 Each tool execution receives an `ExecutionEnv` with:

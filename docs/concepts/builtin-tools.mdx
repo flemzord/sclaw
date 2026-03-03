@@ -154,3 +154,11 @@ func RegisterAll(registry *tool.Registry) error
 ```
 
 To add a custom built-in tool, implement the `tool.Tool` interface and add it to the `RegisterAll` function.
+
+## LLM Visibility
+
+Built-in tools are automatically advertised to the LLM on every request. During **Step 9 (Context Assembly)** of the message pipeline, the router calls `loop.ToolDefinitions()` which collects all registered tools — including built-in ones — and injects them into the provider request as an OpenAI-compatible `tools` array.
+
+This means the LLM knows about `exec`, `read_file`, and `write_file` and can call them during the ReAct reasoning loop. No additional configuration is needed — registering a tool is sufficient for it to appear in the LLM's tool list.
+
+See [Tools](/concepts/tools#tool-advertisement-to-the-llm) for details on how tool definitions flow through the system.

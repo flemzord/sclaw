@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/security"
 )
 
@@ -102,6 +103,26 @@ func (r *Registry) Schemas() []Schema {
 		return cmp.Compare(a.Name, b.Name)
 	})
 	return schemas
+}
+
+// ToolDefinitions returns provider-facing definitions for all registered tools,
+// sorted by name. This is used to populate the "tools" field in LLM API requests.
+func (r *Registry) ToolDefinitions() []provider.ToolDefinition {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	defs := make([]provider.ToolDefinition, 0, len(r.tools))
+	for _, t := range r.tools {
+		defs = append(defs, provider.ToolDefinition{
+			Name:        t.Name(),
+			Description: t.Description(),
+			Parameters:  t.Schema(),
+		})
+	}
+	slices.SortFunc(defs, func(a, b provider.ToolDefinition) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	return defs
 }
 
 // Names returns all registered tool names sorted alphabetically.

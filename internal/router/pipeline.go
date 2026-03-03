@@ -236,6 +236,7 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	req := agent.Request{
 		Messages:     session.History,
 		SystemPrompt: systemPrompt,
+		Tools:        loop.ToolDefinitions(),
 	}
 
 	// Step 9b: Typing indicator — show "typing..." while agent processes.
