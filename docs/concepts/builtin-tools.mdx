@@ -1,10 +1,10 @@
 ---
 title: Built-in Tools
-description: "exec, read_file, and write_file — the tools that ship with every agent"
+description: "exec, read_file, write_file, and config tools — the tools that ship with every agent"
 icon: "toolbox"
 ---
 
-Every sclaw agent starts with three built-in tools registered in the global tool registry. These provide the baseline capabilities agents need to interact with the filesystem and execute commands.
+Every sclaw agent starts with built-in tools registered in the global tool registry. These provide the baseline capabilities agents need to interact with the filesystem, execute commands, and manage configuration.
 
 ## exec
 
@@ -121,9 +121,130 @@ Write content to a file in the workspace or read-write allowed directories.
 {"path": "notes/standup.md", "content": "# Standup 2025-01-15\n- Reviewed PR #42\n- Fixed CI flake"}
 ```
 
+## config.get
+
+Read the current configuration and compute a hash for concurrency control.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_only` |
+| **Default policy** | `allow` |
+
+### Schema
+
+No parameters required.
+
+### Behavior
+
+- Reads the config file from disk
+- Computes a SHA-256 hash on the raw bytes (before env expansion) for deterministic results
+- Redacts all secrets before returning
+- Returns the config as JSON alongside the `base_hash`
+
+### Output
+
+```json
+{
+  "config": { "version": "1", "modules": { ... } },
+  "base_hash": "sha256_hex_digest"
+}
+```
+
+The `base_hash` is required by `config.patch` and `config.apply` for optimistic concurrency control.
+
+## config.validate
+
+Dry-run validation of YAML configuration without writing to disk.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_only` |
+| **Default policy** | `allow` |
+
+### Schema
+
+```json
+{
+  "yaml_content": "string (required)"
+}
+```
+
+### Behavior
+
+- Expands environment variables and parses YAML
+- Runs full schema validation (version, modules, agents)
+- Returns `valid: true` or `valid: false` with the error message
+- No side effects — purely informational
+
+## config.patch
+
+Merge a partial YAML patch into the current configuration.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_write` |
+| **Default policy** | `ask` |
+
+### Schema
+
+```json
+{
+  "base_hash": "string (required, from config.get)",
+  "patch": "string (required, partial YAML to merge)"
+}
+```
+
+### Behavior
+
+- Verifies the `base_hash` matches the current file — rejects if the config changed since the last read
+- Merges using RFC 7386 JSON Merge Patch semantics on the YAML AST:
+  - Mapping keys are merged recursively (patch overrides)
+  - Sequences are replaced entirely
+  - `null` values delete keys
+- Validates the merged result before writing
+- Performs an atomic write (temp file + rename)
+- Triggers a hot-reload after success
+- Warns if the plugin list changed (rebuild may be required)
+- Preserves `${VAR}` references, comments, and key ordering
+
+## config.apply
+
+Replace the entire configuration with new YAML content.
+
+| Property | Value |
+|----------|-------|
+| **Scope** | `read_write` |
+| **Default policy** | `ask` |
+
+### Schema
+
+```json
+{
+  "base_hash": "string (required, from config.get)",
+  "yaml_content": "string (required, complete YAML)"
+}
+```
+
+### Behavior
+
+- Same concurrency control as `config.patch` via `base_hash`
+- Full replacement instead of merge
+- Validates the new content before writing
+- Atomic write + hot-reload
+
+### Typical Workflow
+
+```
+1. config.get        → read config + base_hash
+2. config.validate   → dry-run check (optional)
+3. config.patch      → merge partial changes
+   or config.apply   → replace entirely
+4. (hot-reload triggers automatically)
+```
+
 ## Security Guarantees
 
-All three built-in tools enforce consistent security boundaries:
+All built-in tools enforce consistent security boundaries:
 
 | Protection | Mechanism |
 |-----------|-----------|
@@ -131,8 +252,11 @@ All three built-in tools enforce consistent security boundaries:
 | **Directory access control** | `PathFilter` enforces per-directory RO/RW permissions for `read_file` and `write_file` |
 | **System paths** | `security.ValidatePath` blocks `/proc`, `/sys`, `/dev` |
 | **Secret leakage** | `exec` uses `SanitizedEnv` — API keys, tokens, and credentials are stripped |
-| **Resource limits** | 1 MiB cap on file reads, file writes, and command output |
+| **Resource limits** | 1 MiB cap on file reads, file writes, command output, and config content |
 | **Timeout** | `exec` defaults to 30s, capped at 10 minutes |
+| **Concurrency control** | `config.patch`/`config.apply` use SHA-256 hash to prevent lost updates |
+| **Secret redaction** | `config.get` redacts all secrets before returning config to the LLM |
+| **Atomic writes** | Config changes use temp file + rename to prevent partial writes |
 
 ## Approval Policies
 
@@ -153,14 +277,17 @@ See [Tools](/concepts/tools) for the full approval system documentation.
 
 ## Registration
 
-Built-in tools are registered automatically during application startup via `builtin.RegisterAll()`. They are available to all agents through the global tool registry — no configuration required.
+Built-in tools are registered automatically during application startup. Filesystem and exec tools are registered via `builtin.RegisterAll()`, while config tools are registered via `configtool.RegisterAll()` with their dependencies (config path, redactor, reload function). All tools are available to every agent through the global tool registry — no configuration required.
 
 ```go
 // internal/tool/builtin/register.go
 func RegisterAll(registry *tool.Registry) error
+
+// internal/tool/configtool/configtool.go
+func RegisterAll(registry *tool.Registry, deps Deps) error
 ```
 
-To add a custom built-in tool, implement the `tool.Tool` interface and add it to the `RegisterAll` function.
+To add a custom built-in tool, implement the `tool.Tool` interface and register it through the appropriate package.
 
 ## LLM Visibility
 
