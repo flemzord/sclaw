@@ -52,6 +52,9 @@ func TestFormatSkillsForPrompt_SingleSkill(t *testing.T) {
 	if strings.Contains(result, "Check for bugs.") {
 		t.Error("body should not be included in compact format")
 	}
+	if !strings.Contains(result, "skill catalog above") {
+		t.Error("missing catalog self-reference instruction")
+	}
 	if !strings.Contains(result, "read_file") {
 		t.Error("missing read_file instruction")
 	}

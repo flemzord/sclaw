@@ -37,7 +37,9 @@ func FormatSkillsForPrompt(skills []Skill) string {
 	}
 
 	b.WriteString("\n</available_skills>\n\n")
-	b.WriteString("When you need to use a skill, load its full content using the read_file tool with the path from <location>.")
+	b.WriteString("The skill catalog above lists all your available skills. ")
+	b.WriteString("You can answer questions about which skills you have by reading this catalog directly. ")
+	b.WriteString("To apply a skill, load its full content using the read_file tool with the path from <location>.")
 
 	return b.String()
 }
