@@ -1,3 +1,14 @@
+---
+name: canvas
+description: Display HTML content on connected OpenClaw nodes (Mac app, iOS, Android).
+trigger: auto
+keywords:
+  - canvas
+  - html
+  - display
+  - render
+---
+
 # Canvas Skill
 
 Display HTML content on connected OpenClaw nodes (Mac app, iOS, Android).

@@ -2,6 +2,13 @@
 name: 1password
 description: Set up and use 1Password CLI (op). Use when installing the CLI, enabling desktop app integration, signing in (single or multi-account), or reading/injecting/running secrets via op.
 homepage: https://developer.1password.com/docs/cli/get-started/
+trigger: auto
+keywords:
+  - 1password
+  - op vault
+  - secret
+  - credential
+  - password
 metadata:
   {
     "openclaw":

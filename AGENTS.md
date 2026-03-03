@@ -36,6 +36,7 @@ internal/             → Private packages (not importable)
 pkg/                  → Public reusable packages
   pkg/app/            → Shared entry point (Run, ResolveConfigPath)
   pkg/message/        → Platform-agnostic message model
+skills/               → Embedded SKILL.md files (go:embed)
 docs/                 → Additional documentation
   docs/security/      → Security documentation
 ```
@@ -135,6 +136,57 @@ sclaw implements defense-in-depth security across the entire message pipeline:
 | Plugin certification | Ed25519 signature verification with trusted key list | `internal/cert/` |
 
 See `docs/security/prompt-injection.md` for the full threat model and mitigation details.
+
+## Skills
+
+Skills are Markdown files (`SKILL.md`) with YAML frontmatter, embedded into the binary via `go:embed`. They provide contextual instructions injected into the LLM prompt based on activation rules.
+
+### SKILL.md Frontmatter
+
+```yaml
+---
+name: my-skill
+description: Short description of what the skill does.
+trigger: auto          # always | auto | manual (default: manual)
+keywords:              # required when trigger is "auto"
+  - keyword1
+  - keyword2
+metadata:
+  { "openclaw": { ... } }
+---
+```
+
+### Trigger Modes
+
+| Mode | Behavior |
+|------|----------|
+| `always` | Skill is injected on every message (requires all `tools_required` available) |
+| `auto` | Skill is injected when any keyword matches the user message (case-insensitive substring, OR logic) |
+| `manual` | Skill is injected only when explicitly activated by name |
+
+### Builtin Skills
+
+| Skill | Trigger | Keywords |
+|-------|---------|----------|
+| 1password | auto | `1password`, `op vault`, `secret`, `credential`, `password` |
+| apple-notes | auto | `apple notes`, `note`, `memo` |
+| apple-reminders | auto | `reminder`, `remindctl`, `todo`, `task` |
+| bear-notes | auto | `bear`, `grizzly` |
+| blogwatcher | auto | `blog`, `rss`, `feed`, `atom` |
+| canvas | auto | `canvas`, `html`, `display`, `render` |
+| coding-agent | auto | `codex`, `claude code`, `coding agent`, `delegate`, `spawn agent` |
+| github | auto | `github`, `pull request`, `issue`, `pr`, `ci`, `gh` |
+| gog | auto | `gmail`, `calendar`, `drive`, `google`, `sheets`, `docs`, `gog` |
+| obsidian | auto | `obsidian`, `vault`, `obsidian-cli` |
+| tmux | auto | `tmux`, `terminal`, `session`, `pane` |
+| trello | auto | `trello`, `board`, `card`, `kanban` |
+| weather | auto | `weather`, `forecast`, `temperature`, `météo` |
+
+### Key Packages
+
+- `internal/workspace/skill.go` — `ParseSkill`, `SkillMeta` struct, frontmatter parsing
+- `internal/workspace/activator.go` — `SkillActivator.Activate` (3-pass: always → auto → manual)
+- `skills/embed.go` — `go:embed` directive for builtin skills
 
 ## CI/CD
 

@@ -2,6 +2,12 @@
 name: trello
 description: Manage Trello boards, lists, and cards via the Trello REST API.
 homepage: https://developer.atlassian.com/cloud/trello/rest/
+trigger: auto
+keywords:
+  - trello
+  - board
+  - card
+  - kanban
 metadata:
   {
     "openclaw":
