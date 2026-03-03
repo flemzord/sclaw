@@ -157,6 +157,7 @@ func wireRouter(
 		AgentFactory:    factory,
 		ResponseSender:  dispatcher,
 		ChannelLookup:   dispatcher,
+		StreamSender:    dispatcher,
 		Logger:          logger,
 		RateLimiter:     rateLimiter,
 		HistoryResolver: factory,

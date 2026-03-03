@@ -17,10 +17,17 @@ type AgentConfig struct {
 	Workspace string        `yaml:"workspace"`
 	Provider  string        `yaml:"provider"`
 	Tools     []string      `yaml:"tools"`
+	Streaming *bool         `yaml:"streaming"`
 	Memory    MemoryConfig  `yaml:"memory"`
 	Routing   RoutingConfig `yaml:"routing"`
 	Loop      LoopOverrides `yaml:"loop"`
 	Cron      CronConfig    `yaml:"cron"`
+}
+
+// IsStreamingEnabled returns whether streaming is enabled for this agent.
+// Defaults to true when not explicitly set.
+func (c AgentConfig) IsStreamingEnabled() bool {
+	return c.Streaming == nil || *c.Streaming
 }
 
 // CronConfig holds per-agent cron job settings.

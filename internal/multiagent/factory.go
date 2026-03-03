@@ -110,6 +110,9 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 		return nil, fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
 	}
 
+	// Propagate streaming flag to the session.
+	session.StreamingEnabled = agentCfg.IsStreamingEnabled()
+
 	// Resolve provider.
 	// Note: custom provider resolution would go here in the future.
 	// For now, all agents use the default provider.

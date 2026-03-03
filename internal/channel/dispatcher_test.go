@@ -145,3 +145,105 @@ func TestDispatcher_ConcurrentAccess(t *testing.T) {
 		<-done
 	}
 }
+
+func TestDispatcher_SendStream_StreamingChannel(t *testing.T) {
+	t.Parallel()
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockStreamingChannel("telegram", al)
+	_ = d.Register("telegram", ch)
+
+	msg := message.OutboundMessage{
+		Channel: "telegram",
+		Chat:    message.Chat{ID: "chat-1"},
+	}
+
+	stream := make(chan string, 3)
+	stream <- "Hello"
+	stream <- " World"
+	close(stream)
+
+	streamed, err := d.SendStream(context.Background(), msg, stream)
+	if err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+	if !streamed {
+		t.Fatal("expected streamed=true for StreamingChannel")
+	}
+
+	chunks := ch.StreamChunks()
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(chunks))
+	}
+	if chunks[0] != "Hello" || chunks[1] != " World" {
+		t.Errorf("chunks = %v, want [Hello, World]", chunks)
+	}
+}
+
+func TestDispatcher_SendStream_NonStreamingChannel(t *testing.T) {
+	t.Parallel()
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockChannel("slack", al)
+	_ = d.Register("slack", ch)
+
+	msg := message.OutboundMessage{
+		Channel: "slack",
+		Chat:    message.Chat{ID: "chat-1"},
+	}
+
+	stream := make(chan string, 1)
+	stream <- "Hello"
+	close(stream)
+
+	streamed, err := d.SendStream(context.Background(), msg, stream)
+	if err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+	if streamed {
+		t.Fatal("expected streamed=false for non-streaming channel")
+	}
+}
+
+func TestDispatcher_SendStream_UnknownChannel(t *testing.T) {
+	t.Parallel()
+	d := channel.NewDispatcher()
+
+	msg := message.OutboundMessage{
+		Channel: "unknown",
+		Chat:    message.Chat{ID: "chat-1"},
+	}
+
+	stream := make(chan string)
+	close(stream)
+
+	_, err := d.SendStream(context.Background(), msg, stream)
+	if !errors.Is(err, channel.ErrNoChannel) {
+		t.Errorf("SendStream = %v, want ErrNoChannel", err)
+	}
+}
+
+func TestDispatcher_SendStream_StreamingDisabled(t *testing.T) {
+	t.Parallel()
+	d := channel.NewDispatcher()
+	al := channel.NewAllowList([]string{"alice"}, nil)
+	ch := channeltest.NewMockStreamingChannel("telegram", al)
+	ch.SupportsStreamingFunc = func() bool { return false }
+	_ = d.Register("telegram", ch)
+
+	msg := message.OutboundMessage{
+		Channel: "telegram",
+		Chat:    message.Chat{ID: "chat-1"},
+	}
+
+	stream := make(chan string)
+	close(stream)
+
+	streamed, err := d.SendStream(context.Background(), msg, stream)
+	if err != nil {
+		t.Fatalf("SendStream: %v", err)
+	}
+	if streamed {
+		t.Fatal("expected streamed=false when SupportsStreaming returns false")
+	}
+}

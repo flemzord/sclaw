@@ -59,6 +59,31 @@ func (d *Dispatcher) Send(ctx context.Context, msg message.OutboundMessage) erro
 	return ch.Send(ctx, msg)
 }
 
+// SendStream delivers a streaming response to the channel identified by
+// msg.Channel. If the channel implements StreamingChannel and currently
+// supports streaming, it delegates to StreamingChannel.SendStream and
+// returns (true, nil) on success. If the channel does not support
+// streaming, it returns (false, nil) so the caller can fall back to Send.
+func (d *Dispatcher) SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error) {
+	d.mu.RLock()
+	ch, ok := d.channels[msg.Channel]
+	d.mu.RUnlock()
+
+	if !ok {
+		return false, fmt.Errorf("%w: %s", ErrNoChannel, msg.Channel)
+	}
+
+	sc, ok := ch.(StreamingChannel)
+	if !ok || !sc.SupportsStreaming() {
+		return false, nil
+	}
+
+	if err := sc.SendStream(ctx, msg.Chat, stream); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Channels returns the names of all registered channels.
 func (d *Dispatcher) Channels() []string {
 	d.mu.RLock()

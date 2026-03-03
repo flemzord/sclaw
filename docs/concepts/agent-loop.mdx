@@ -78,7 +78,13 @@ The agent loop terminates with one of these stop reasons:
 
 ## Streaming
 
-The agent loop supports streaming via `RunStream()`, which returns a channel of `StreamEvent` values:
+Streaming is **enabled by default** for all agents. When active, the pipeline uses `RunStream()` instead of `Run()`, forwarding text chunks to the channel in real time. Channels that support streaming (e.g., Telegram) edit the response message progressively as chunks arrive.
+
+If a channel does not support streaming, or if the stream initialization fails, the pipeline automatically falls back to the synchronous path — no user action required.
+
+To disable streaming for a specific agent, set `streaming: false` in the agent configuration.
+
+`RunStream()` returns a channel of `StreamEvent` values:
 
 | Event Type | Description |
 |------------|-------------|
@@ -90,7 +96,7 @@ The agent loop supports streaming via `RunStream()`, which returns a channel of 
 | `StreamEventError` | Error (budget exceeded, loop detected, provider failure). |
 
 <Tip>
-Streaming is used by channel adapters to provide real-time response updates. For example, the Telegram channel edits the message progressively as chunks arrive.
+Streaming is used by channel adapters to provide real-time response updates. For example, the Telegram channel edits the message progressively as chunks arrive. Configure `stream_flush_interval` on the Telegram channel to control how often edits are sent.
 </Tip>
 
 ## Configuration Example

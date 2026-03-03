@@ -162,6 +162,47 @@ func (m *MockSoulResolver) ResolveSoul(agentID string) (string, error) {
 	return "You are a helpful assistant.", nil
 }
 
+// MockStreamSender records stream interactions for test assertions.
+type MockStreamSender struct {
+	SendStreamFunc func(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error)
+	mu             sync.Mutex
+	calls          int
+	chunks         []string
+}
+
+// SendStream delegates to SendStreamFunc if set, otherwise drains the stream
+// and records all chunks, returning (true, nil).
+func (m *MockStreamSender) SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error) {
+	if m.SendStreamFunc != nil {
+		return m.SendStreamFunc(ctx, msg, stream)
+	}
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	for chunk := range stream {
+		m.mu.Lock()
+		m.chunks = append(m.chunks, chunk)
+		m.mu.Unlock()
+	}
+	return true, nil
+}
+
+// Chunks returns a copy of all recorded stream chunks.
+func (m *MockStreamSender) Chunks() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]string, len(m.chunks))
+	copy(cp, m.chunks)
+	return cp
+}
+
+// CallCount returns the number of times SendStream was called.
+func (m *MockStreamSender) CallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
 // Interface guards.
 var (
 	_ router.ResponseSender  = (*MockResponseSender)(nil)
@@ -169,4 +210,5 @@ var (
 	_ router.SessionStore    = (*MockSessionStore)(nil)
 	_ router.HistoryResolver = (*MockHistoryResolver)(nil)
 	_ router.SoulResolver    = (*MockSoulResolver)(nil)
+	_ router.StreamSender    = (*MockStreamSender)(nil)
 )

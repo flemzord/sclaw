@@ -14,6 +14,7 @@ The `agents` section enables multi-agent mode. Each key is an agent name, and it
 | `workspace` | string | — | Working directory for tool execution. |
 | `provider` | string | — | Module ID of the provider to use (must exist in `modules`). |
 | `tools` | list | — | Tool names available to this agent. |
+| `streaming` | bool | `true` | Stream LLM responses progressively to the channel. |
 | `memory` | object | — | Memory settings for this agent. |
 | `routing` | object | — | Routing rules for message dispatch. |
 | `loop` | object | — | ReAct loop parameter overrides. |
@@ -53,6 +54,20 @@ Set `loop_threshold` to 3–5 to prevent the agent from getting stuck in repetit
 | `enabled` | bool | `true` | Whether conversation history is persisted for this agent. |
 
 When `enabled` is `false`, no SQLite database is opened for the agent, and conversation history is only kept in memory for the duration of the session.
+
+## Streaming
+
+Streaming is **enabled by default**. When active, the agent loop streams LLM responses progressively to the channel instead of waiting for the complete response. Channels that support streaming (e.g., Telegram) edit the message in place as chunks arrive, giving users real-time feedback.
+
+If the channel does not support streaming, sclaw automatically falls back to the standard synchronous send — no configuration change needed.
+
+To disable streaming for a specific agent:
+
+```yaml
+agents:
+  main:
+    streaming: false
+```
 
 ## Single-Agent Mode
 

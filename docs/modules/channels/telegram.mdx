@@ -73,7 +73,7 @@ The `channel.telegram` module connects sclaw to Telegram as a messaging channel.
 
 ## Streaming
 
-When the agent loop supports streaming, the Telegram channel edits the response message progressively as chunks arrive. The `stream_flush_interval` controls how frequently edits are sent to the Telegram API.
+Streaming is enabled by default for all agents. When active, the Telegram channel edits the response message progressively as chunks arrive instead of waiting for the full response. The `stream_flush_interval` controls how frequently edits are sent to the Telegram API.
 
 ```yaml
 modules:

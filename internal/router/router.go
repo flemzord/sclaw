@@ -32,6 +32,10 @@ type Config struct {
 	// Nil → no hooks (backward compatible).
 	HookPipeline *hook.Pipeline
 
+	// StreamSender, if non-nil, delivers streaming responses to channels.
+	// Nil means streaming is disabled globally (backward compatible).
+	StreamSender StreamSender
+
 	// RateLimiter, if non-nil, enforces message and session rate limits.
 	RateLimiter *security.RateLimiter
 
@@ -114,6 +118,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		AgentFactory:    cfg.AgentFactory,
 		ResponseSender:  cfg.ResponseSender,
 		ChannelLookup:   cfg.ChannelLookup,
+		StreamSender:    cfg.StreamSender,
 		Pruner:          pruner,
 		Logger:          cfg.Logger,
 		HookPipeline:    cfg.HookPipeline,

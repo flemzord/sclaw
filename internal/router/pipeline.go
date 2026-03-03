@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/flemzord/sclaw/internal/agent"
 	"github.com/flemzord/sclaw/internal/channel"
@@ -33,6 +34,11 @@ type PipelineConfig struct {
 	// ChannelLookup resolves channels by name, used to start typing
 	// indicators while the agent is processing. Nil means no typing.
 	ChannelLookup ChannelLookup
+
+	// StreamSender, if non-nil, delivers streaming responses to channels
+	// that support progressive message editing (e.g. Telegram edit-in-place).
+	// Nil means streaming is disabled globally (backward compatible).
+	StreamSender StreamSender
 
 	// AuditLogger, if non-nil, emits session lifecycle events (session_create).
 	// session_delete events are emitted by the admin handler.
@@ -229,7 +235,11 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		}
 	}
 
-	// Step 10: Agent loop — run the agent.
+	// Step 10: Agent loop — run synchronously or stream depending on config.
+	if session.StreamingEnabled && p.cfg.StreamSender != nil {
+		return p.executeStreaming(ctx, env, session, loop, req, cancelTyping, hookMeta, logger)
+	}
+
 	resp, err := loop.Run(ctx, req)
 
 	// Stop typing indicator before handling the result.
@@ -266,6 +276,21 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Response: &resp, Error: err}
 	}
 
+	return p.finalize(ctx, env, session, resp, hookMeta, logger)
+}
+
+// finalize handles Steps 13–14 (persistence, hooks, pruning) after a response
+// has been delivered, regardless of whether it was sent synchronously or streamed.
+func (p *Pipeline) finalize(
+	ctx context.Context,
+	env envelope,
+	session *Session,
+	resp agent.Response,
+	hookMeta map[string]any,
+	logger *slog.Logger,
+) PipelineResult {
+	outbound := buildOutbound(env.Message, resp)
+
 	// Step 13: Persistence — save assistant response to history and touch session.
 	assistantMsg := provider.LLMMessage{
 		Role:    provider.MessageRoleAssistant,
@@ -274,8 +299,7 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	session.History = append(session.History, assistantMsg)
 	p.cfg.Store.Touch(env.Key)
 
-	// m-60: Trim history after appending assistant message. After Step 13,
-	// history may exceed MaxHistoryLen by 1. Trim it here to maintain the invariant.
+	// m-60: Trim history after appending assistant message.
 	if limit := p.cfg.MaxHistoryLen; len(session.History) > limit {
 		session.History = session.History[len(session.History)-limit:]
 	}
@@ -313,6 +337,225 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 	}
 
 	return PipelineResult{Session: session, Response: &resp}
+}
+
+// executeStreaming runs the agent in streaming mode and delivers chunks
+// progressively to the channel. Falls back to the synchronous path if
+// RunStream fails or the channel does not support streaming.
+func (p *Pipeline) executeStreaming(
+	ctx context.Context,
+	env envelope,
+	session *Session,
+	loop *agent.Loop,
+	req agent.Request,
+	cancelTyping context.CancelFunc,
+	hookMeta map[string]any,
+	logger *slog.Logger,
+) PipelineResult {
+	streamCh, err := loop.RunStream(ctx, req)
+	if err != nil {
+		// Fallback to synchronous path on stream init error.
+		logger.Warn("pipeline: RunStream failed, falling back to sync",
+			"session_id", session.ID, "error", err)
+		return p.executeSyncFallback(ctx, env, session, loop, req, cancelTyping, hookMeta, logger)
+	}
+
+	// Build the outbound message shell for the stream sender.
+	outbound := message.OutboundMessage{
+		Channel:  env.Message.Channel,
+		Chat:     env.Message.Chat,
+		ThreadID: env.Message.ThreadID,
+	}
+
+	// textCh bridges StreamEvent text chunks to the StreamSender.
+	textCh := make(chan string, 4)
+
+	// Start the stream sender in a goroutine.
+	type sendResult struct {
+		streamed bool
+		err      error
+	}
+	sendDone := make(chan sendResult, 1)
+	go func() {
+		streamed, err := p.cfg.StreamSender.SendStream(ctx, outbound, textCh)
+		sendDone <- sendResult{streamed: streamed, err: err}
+	}()
+
+	// Drain the agent stream, forwarding text chunks to textCh.
+	var builder strings.Builder
+	var final *agent.Response
+	var streamErr error
+
+	for event := range streamCh {
+		switch event.Type {
+		case agent.StreamEventText:
+			builder.WriteString(event.Content)
+			// Non-blocking send to textCh; drop chunk if buffer full
+			// to avoid blocking the agent loop. The final text is sent
+			// via the before_send hook correction path if needed.
+			select {
+			case textCh <- event.Content:
+			default:
+			}
+
+		case agent.StreamEventToolStart:
+			logger.Debug("pipeline: stream tool start",
+				"session_id", session.ID,
+				"tool", event.ToolCall.Name)
+
+		case agent.StreamEventToolEnd:
+			logger.Debug("pipeline: stream tool end",
+				"session_id", session.ID,
+				"tool", event.ToolCall.Name)
+
+		case agent.StreamEventDone:
+			final = event.Final
+
+		case agent.StreamEventError:
+			streamErr = event.Err
+
+		case agent.StreamEventUsage:
+			// Usage tracking is handled internally by the agent loop.
+		}
+	}
+
+	close(textCh)
+
+	// Stop typing indicator.
+	if cancelTyping != nil {
+		cancelTyping()
+	}
+
+	// Wait for SendStream to finish.
+	sr := <-sendDone
+
+	if streamErr != nil {
+		logger.Error("pipeline: agent stream error",
+			"error", streamErr, "session_id", session.ID)
+		p.sendError(ctx, env.Message, "An error occurred while processing your message.")
+		return PipelineResult{Session: session, Error: streamErr}
+	}
+
+	// Build the response from the final event or accumulated text.
+	var resp agent.Response
+	if final != nil {
+		resp = *final
+	} else {
+		resp = agent.Response{Content: builder.String()}
+	}
+
+	// If the channel did not support streaming, fall back to a regular Send.
+	if !sr.streamed {
+		outFull := buildOutbound(env.Message, resp)
+
+		// Run before_send hook.
+		if p.cfg.HookPipeline != nil {
+			hctx := &hook.Context{
+				Position: hook.BeforeSend,
+				Inbound:  env.Message,
+				Outbound: &outFull,
+				Response: &resp,
+				Session:  &sessionViewAdapter{session: session},
+				Metadata: hookMeta,
+				Logger:   logger,
+			}
+			if _, err := p.cfg.HookPipeline.RunBeforeSend(ctx, hctx); err != nil {
+				logger.Warn("pipeline: hook before_send error", "error", err)
+			}
+		}
+
+		if err := p.cfg.ResponseSender.Send(ctx, outFull); err != nil {
+			logger.Error("pipeline: failed to send response (stream fallback)",
+				"error", err, "session_id", session.ID)
+			return PipelineResult{Session: session, Response: &resp, Error: err}
+		}
+		return p.finalize(ctx, env, session, resp, hookMeta, logger)
+	}
+
+	if sr.err != nil {
+		logger.Error("pipeline: stream send error",
+			"error", sr.err, "session_id", session.ID)
+		return PipelineResult{Session: session, Response: &resp, Error: sr.err}
+	}
+
+	// Run before_send hook with the final accumulated text.
+	// If the hook modifies the response, send a corrective message.
+	if p.cfg.HookPipeline != nil {
+		outFull := buildOutbound(env.Message, resp)
+		originalContent := resp.Content
+		hctx := &hook.Context{
+			Position: hook.BeforeSend,
+			Inbound:  env.Message,
+			Outbound: &outFull,
+			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		if _, err := p.cfg.HookPipeline.RunBeforeSend(ctx, hctx); err != nil {
+			logger.Warn("pipeline: hook before_send error", "error", err)
+		}
+		// If hook modified the content, send a corrective message.
+		if resp.Content != originalContent {
+			corrective := buildOutbound(env.Message, resp)
+			if err := p.cfg.ResponseSender.Send(ctx, corrective); err != nil {
+				logger.Warn("pipeline: failed to send hook-corrected message",
+					"error", err, "session_id", session.ID)
+			}
+		}
+	}
+
+	return p.finalize(ctx, env, session, resp, hookMeta, logger)
+}
+
+// executeSyncFallback runs the synchronous agent path when streaming
+// initialization fails.
+func (p *Pipeline) executeSyncFallback(
+	ctx context.Context,
+	env envelope,
+	session *Session,
+	loop *agent.Loop,
+	req agent.Request,
+	cancelTyping context.CancelFunc,
+	hookMeta map[string]any,
+	logger *slog.Logger,
+) PipelineResult {
+	resp, err := loop.Run(ctx, req)
+
+	if cancelTyping != nil {
+		cancelTyping()
+	}
+
+	if err != nil {
+		logger.Error("pipeline: agent loop failed (sync fallback)",
+			"error", err, "session_id", session.ID)
+		p.sendError(ctx, env.Message, "An error occurred while processing your message.")
+		return PipelineResult{Session: session, Error: err}
+	}
+
+	outbound := buildOutbound(env.Message, resp)
+	if p.cfg.HookPipeline != nil {
+		hctx := &hook.Context{
+			Position: hook.BeforeSend,
+			Inbound:  env.Message,
+			Outbound: &outbound,
+			Response: &resp,
+			Session:  &sessionViewAdapter{session: session},
+			Metadata: hookMeta,
+			Logger:   logger,
+		}
+		if _, err := p.cfg.HookPipeline.RunBeforeSend(ctx, hctx); err != nil {
+			logger.Warn("pipeline: hook before_send error", "error", err)
+		}
+	}
+
+	if err := p.cfg.ResponseSender.Send(ctx, outbound); err != nil {
+		logger.Error("pipeline: failed to send response (sync fallback)",
+			"error", err, "session_id", session.ID)
+		return PipelineResult{Session: session, Response: &resp, Error: err}
+	}
+
+	return p.finalize(ctx, env, session, resp, hookMeta, logger)
 }
 
 // sendError sends a user-friendly error message via ResponseSender. Never panics.

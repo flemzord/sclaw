@@ -110,6 +110,35 @@ func TestMemoryConfig_IsEnabled_ExplicitFalse(t *testing.T) {
 	}
 }
 
+func TestAgentConfig_IsStreamingEnabled_DefaultTrue(t *testing.T) {
+	t.Parallel()
+
+	cfg := AgentConfig{}
+	if !cfg.IsStreamingEnabled() {
+		t.Error("IsStreamingEnabled() = false, want true (nil Streaming should default to true)")
+	}
+}
+
+func TestAgentConfig_IsStreamingEnabled_ExplicitTrue(t *testing.T) {
+	t.Parallel()
+
+	v := true
+	cfg := AgentConfig{Streaming: &v}
+	if !cfg.IsStreamingEnabled() {
+		t.Error("IsStreamingEnabled() = false, want true")
+	}
+}
+
+func TestAgentConfig_IsStreamingEnabled_ExplicitFalse(t *testing.T) {
+	t.Parallel()
+
+	v := false
+	cfg := AgentConfig{Streaming: &v}
+	if cfg.IsStreamingEnabled() {
+		t.Error("IsStreamingEnabled() = true, want false")
+	}
+}
+
 func TestParseAgents_WithMemoryAndDataDir(t *testing.T) {
 	t.Parallel()
 

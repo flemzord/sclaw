@@ -29,13 +29,14 @@ func SessionKeyFromMessage(msg message.InboundMessage) SessionKey {
 // It holds the full conversation history and metadata needed by the
 // agent loop to produce contextual responses.
 type Session struct {
-	ID           string
-	Key          SessionKey
-	AgentID      string
-	CreatedAt    time.Time
-	LastActiveAt time.Time
-	History      []provider.LLMMessage
-	Metadata     map[string]any
+	ID               string
+	Key              SessionKey
+	AgentID          string
+	StreamingEnabled bool
+	CreatedAt        time.Time
+	LastActiveAt     time.Time
+	History          []provider.LLMMessage
+	Metadata         map[string]any
 }
 
 // SessionStore manages session lifecycle.

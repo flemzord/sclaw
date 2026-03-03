@@ -927,3 +927,322 @@ func TestPipeline_HistoryResolver_Nil(t *testing.T) {
 		t.Fatal("expected non-nil response")
 	}
 }
+
+// --- Streaming pipeline tests ---
+
+// testStreamSender records streaming calls for test assertions.
+type testStreamSender struct {
+	mu       sync.Mutex
+	calls    int
+	chunks   []string
+	sendFunc func(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error)
+}
+
+func (s *testStreamSender) SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error) {
+	if s.sendFunc != nil {
+		return s.sendFunc(ctx, msg, stream)
+	}
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+	for chunk := range stream {
+		s.mu.Lock()
+		s.chunks = append(s.chunks, chunk)
+		s.mu.Unlock()
+	}
+	return true, nil
+}
+
+func (s *testStreamSender) getChunks() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]string, len(s.chunks))
+	copy(cp, s.chunks)
+	return cp
+}
+
+// newStreamingMockProvider creates a MockProvider with a Stream func that
+// sends the given chunks and then closes the channel.
+func newStreamingMockProvider(chunks []string) *providertest.MockProvider {
+	return &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
+			return provider.CompletionResponse{
+				Content:      concatenate(chunks),
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		StreamFunc: func(_ context.Context, _ provider.CompletionRequest) (<-chan provider.StreamChunk, error) {
+			ch := make(chan provider.StreamChunk, len(chunks)+1)
+			for _, c := range chunks {
+				ch <- provider.StreamChunk{Content: c}
+			}
+			ch <- provider.StreamChunk{Usage: &provider.TokenUsage{PromptTokens: 10, CompletionTokens: 5}}
+			close(ch)
+			return ch, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+}
+
+func concatenate(ss []string) string {
+	var b string
+	for _, s := range ss {
+		b += s
+	}
+	return b
+}
+
+// streamingAgentFactory sets StreamingEnabled on the session.
+type streamingAgentFactory struct {
+	inner   AgentFactory
+	agentID string
+}
+
+func (f *streamingAgentFactory) ForSession(session *Session, msg message.InboundMessage) (*agent.Loop, error) {
+	if session.AgentID == "" {
+		session.AgentID = f.agentID
+	}
+	session.StreamingEnabled = true
+	return f.inner.ForSession(session, msg)
+}
+
+func TestPipeline_Streaming_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	chunks := []string{"Hello", " ", "World", "!"}
+	mockProv := newStreamingMockProvider(chunks)
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	streamSender := &testStreamSender{}
+	store := NewInMemorySessionStore()
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &streamingAgentFactory{inner: &testAgentFactory{loop: loop}, agentID: "default"},
+		ResponseSender:  sender,
+		StreamSender:    streamSender,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Response == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if result.Response.Content != "Hello World!" {
+		t.Errorf("response content = %q, want %q", result.Response.Content, "Hello World!")
+	}
+
+	// Verify chunks were streamed.
+	gotChunks := streamSender.getChunks()
+	if len(gotChunks) == 0 {
+		t.Fatal("expected stream chunks, got none")
+	}
+
+	// The sync sender should NOT have been called (streaming succeeded).
+	sent := sender.sentMessages()
+	if len(sent) != 0 {
+		t.Errorf("sync sender called %d times, want 0 (streaming should handle delivery)", len(sent))
+	}
+
+	// Verify history was persisted (user + assistant = 2).
+	if len(result.Session.History) != 2 {
+		t.Errorf("history length = %d, want 2", len(result.Session.History))
+	}
+}
+
+func TestPipeline_Streaming_FallbackWhenDisabled(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("Sync response")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	streamSender := &testStreamSender{}
+	store := NewInMemorySessionStore()
+
+	// StreamingEnabled is false on the session (default testAgentFactory).
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		StreamSender:    streamSender,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Sync sender should have been used.
+	sent := sender.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sync sender called %d times, want 1", len(sent))
+	}
+
+	// Stream sender should NOT have been called.
+	if len(streamSender.getChunks()) != 0 {
+		t.Error("stream sender should not have been called when streaming is disabled")
+	}
+}
+
+func TestPipeline_Streaming_FallbackWhenChannelUnsupported(t *testing.T) {
+	t.Parallel()
+
+	chunks := []string{"Hello", "!"}
+	mockProv := newStreamingMockProvider(chunks)
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	// Stream sender returns (false, nil) to signal channel doesn't support streaming.
+	streamSender := &testStreamSender{
+		sendFunc: func(_ context.Context, _ message.OutboundMessage, stream <-chan string) (bool, error) {
+			//nolint:revive // intentional drain to avoid goroutine leak
+			for range stream {
+			}
+			return false, nil
+		},
+	}
+	store := NewInMemorySessionStore()
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &streamingAgentFactory{inner: &testAgentFactory{loop: loop}, agentID: "default"},
+		ResponseSender:  sender,
+		StreamSender:    streamSender,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	// Sync sender should have been called as fallback.
+	sent := sender.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sync sender called %d times, want 1 (fallback)", len(sent))
+	}
+}
+
+func TestPipeline_Streaming_MidStreamError(t *testing.T) {
+	t.Parallel()
+
+	streamErr := errors.New("mid-stream provider error")
+	mockProv := &providertest.MockProvider{
+		StreamFunc: func(_ context.Context, _ provider.CompletionRequest) (<-chan provider.StreamChunk, error) {
+			ch := make(chan provider.StreamChunk, 3)
+			ch <- provider.StreamChunk{Content: "partial"}
+			ch <- provider.StreamChunk{Err: streamErr}
+			close(ch)
+			return ch, nil
+		},
+		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
+			return provider.CompletionResponse{Content: "fallback", FinishReason: provider.FinishReasonStop}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	streamSender := &testStreamSender{}
+	store := NewInMemorySessionStore()
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &streamingAgentFactory{inner: &testAgentFactory{loop: loop}, agentID: "default"},
+		ResponseSender:  sender,
+		StreamSender:    streamSender,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	// Mid-stream error should result in an error sent to the user.
+	if result.Error == nil {
+		t.Fatal("expected error from mid-stream failure")
+	}
+
+	// An error message should have been sent to the user.
+	sent := sender.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("error sender called %d times, want 1", len(sent))
+	}
+}
+
+func TestPipeline_Streaming_HooksInvoked(t *testing.T) {
+	t.Parallel()
+
+	chunks := []string{"Streamed"}
+	mockProv := newStreamingMockProvider(chunks)
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	streamSender := &testStreamSender{}
+	store := NewInMemorySessionStore()
+	hooks := hook.NewPipeline()
+
+	var mu sync.Mutex
+	var invoked []string
+
+	hooks.Register(&trackingHook{name: "bp", pos: hook.BeforeProcess, mu: &mu, invoked: &invoked})
+	hooks.Register(&trackingHook{name: "bs", pos: hook.BeforeSend, mu: &mu, invoked: &invoked})
+	hooks.Register(&trackingHook{name: "as", pos: hook.AfterSend, mu: &mu, invoked: &invoked})
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &streamingAgentFactory{inner: &testAgentFactory{loop: loop}, agentID: "default"},
+		ResponseSender:  sender,
+		StreamSender:    streamSender,
+		HookPipeline:    hooks,
+		Logger:          slog.Default(),
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	expected := []string{"bp", "bs", "as"}
+	if len(invoked) != len(expected) {
+		t.Fatalf("invoked hooks = %v, want %v", invoked, expected)
+	}
+	for i, name := range expected {
+		if invoked[i] != name {
+			t.Errorf("invoked[%d] = %q, want %q", i, invoked[i], name)
+		}
+	}
+}

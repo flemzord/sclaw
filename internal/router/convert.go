@@ -39,6 +39,15 @@ type ResponseSender interface {
 	Send(ctx context.Context, msg message.OutboundMessage) error
 }
 
+// StreamSender delivers streaming responses to a channel.
+// SendStream sends chunks from stream to the platform as progressive edits.
+// It returns (true, nil) if the channel supports streaming and delivery
+// succeeded, (false, nil) if the channel does not support streaming (caller
+// should fall back to Send), or (false, err) on failure.
+type StreamSender interface {
+	SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) (bool, error)
+}
+
 // ChannelLookup resolves a channel by name. Implemented by channel.Dispatcher.
 type ChannelLookup interface {
 	Get(name string) (channel.Channel, bool)

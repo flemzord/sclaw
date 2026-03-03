@@ -57,6 +57,7 @@ agents:
     provider: "provider.openai_compatible"
     workspace: "/home/user/projects"      # Tool working directory
     tools: ["exec", "read_file", "write_file"]
+    streaming: false                      # Disable streaming (send full response)
     memory:
       enabled: true
     routing:
