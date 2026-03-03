@@ -40,6 +40,15 @@ func (l *Loop) ToolDefinitions() []provider.ToolDefinition {
 	return l.executor.ToolDefinitions()
 }
 
+// Workspace returns the working directory configured for tool execution.
+// Returns empty string if the executor is not set.
+func (l *Loop) Workspace() string {
+	if l.executor == nil {
+		return ""
+	}
+	return l.executor.Workspace()
+}
+
 // buildInitialMessages assembles the initial message history from the request.
 func buildInitialMessages(req Request) []provider.LLMMessage {
 	var messages []provider.LLMMessage

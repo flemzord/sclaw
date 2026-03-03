@@ -233,6 +233,14 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		}
 	}
 
+	// Step 9c: Workspace context — tell the LLM which directory it operates in
+	// so it can resolve absolute paths and use tools like read_file correctly.
+	if ws := loop.Workspace(); ws != "" {
+		systemPrompt += "\n\nYour workspace directory is: " + ws +
+			"\nAll file operations (read_file, write_file) and command execution (exec) operate within this directory. " +
+			"You can use both relative and absolute paths as long as they resolve within this workspace."
+	}
+
 	req := agent.Request{
 		Messages:     session.History,
 		SystemPrompt: systemPrompt,

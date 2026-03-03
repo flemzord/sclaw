@@ -50,6 +50,11 @@ func (e *ToolExecutor) ToolDefinitions() []provider.ToolDefinition {
 	return e.registry.ToolDefinitions()
 }
 
+// Workspace returns the working directory configured for tool execution.
+func (e *ToolExecutor) Workspace() string {
+	return e.env.Workspace
+}
+
 // Execute runs all tool calls in parallel and returns results in input order.
 // Panics in individual tools are recovered and reported as error outputs.
 func (e *ToolExecutor) Execute(ctx context.Context, calls []provider.ToolCall) []ToolCallRecord {

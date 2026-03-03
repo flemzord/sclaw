@@ -161,4 +161,6 @@ Built-in tools are automatically advertised to the LLM on every request. During 
 
 This means the LLM knows about `exec`, `read_file`, and `write_file` and can call them during the ReAct reasoning loop. No additional configuration is needed — registering a tool is sufficient for it to appear in the LLM's tool list.
 
+The pipeline also injects the **workspace directory path** into the system prompt (Step 9c), so the LLM knows the absolute path of its working directory and can resolve user-provided paths correctly.
+
 See [Tools](/concepts/tools#tool-advertisement-to-the-llm) for details on how tool definitions flow through the system.

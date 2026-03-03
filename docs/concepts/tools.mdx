@@ -80,6 +80,12 @@ Each `ToolDefinition` contains:
 Tool definitions are computed at request time, not cached. This means tools registered after startup (e.g., via plugins) are automatically available on the next message.
 </Tip>
 
+### Workspace Context
+
+In addition to tool definitions, the pipeline injects the agent's **workspace directory path** into the system prompt (Step 9c). This tells the LLM where file operations and command execution happen, so it can confidently resolve both relative and absolute paths.
+
+Without this context, the LLM would see tools described as operating "in the workspace" but would have no way to know what that workspace is — leading it to refuse absolute path requests.
+
 ## Execution Environment
 
 Each tool execution receives an `ExecutionEnv` with:
