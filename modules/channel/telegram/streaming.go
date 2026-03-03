@@ -60,10 +60,12 @@ func (t *Telegram) SendStream(ctx context.Context, chat message.Chat, stream <-c
 		if len(text) > maxLen {
 			text = truncateUTF8(text, maxLen)
 		}
+		formatted := FormatMarkdownV2(text)
 		_, editErr := t.client.EditMessageText(ctx, EditMessageTextRequest{
 			ChatID:    chatID,
 			MessageID: placeholder.MessageID,
-			Text:      text,
+			Text:      formatted,
+			ParseMode: "MarkdownV2",
 		})
 		if editErr != nil {
 			var apiErr *APIError
@@ -85,7 +87,8 @@ func (t *Telegram) SendStream(ctx context.Context, chat message.Chat, stream <-c
 					_, retryErr := t.client.EditMessageText(ctx, EditMessageTextRequest{
 						ChatID:    chatID,
 						MessageID: placeholder.MessageID,
-						Text:      text,
+						Text:      formatted,
+						ParseMode: "MarkdownV2",
 					})
 					if retryErr == nil {
 						lastFlushed = len(text)

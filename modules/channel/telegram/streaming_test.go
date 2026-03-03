@@ -93,8 +93,86 @@ func TestSendStream(t *testing.T) {
 	}
 
 	lastEdit := edits[len(edits)-1]
-	if lastEdit != "Hello World" {
-		t.Errorf("last edit = %q, want %q", lastEdit, "Hello World")
+	want := FormatMarkdownV2("Hello World")
+	if lastEdit != want {
+		t.Errorf("last edit = %q, want %q", lastEdit, want)
+	}
+}
+
+func TestSendStreamFormatsMarkdownV2(t *testing.T) {
+	var mu sync.Mutex
+	var edits []EditMessageTextRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+
+		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			writeJSON(t, w, APIResponse[Message]{
+				OK: true,
+				Result: Message{
+					MessageID: 42,
+					Chat:      Chat{ID: 100, Type: "private"},
+				},
+			})
+			return
+		}
+
+		if strings.HasSuffix(r.URL.Path, "/editMessageText") {
+			var req EditMessageTextRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Errorf("unmarshal edit request: %v", err)
+			}
+			mu.Lock()
+			edits = append(edits, req)
+			mu.Unlock()
+			writeJSON(t, w, APIResponse[Message]{
+				OK: true,
+				Result: Message{
+					MessageID: 42,
+					Chat:      Chat{ID: 100, Type: "private"},
+					Text:      req.Text,
+				},
+			})
+			return
+		}
+	}))
+	defer srv.Close()
+
+	client := NewClient("TOKEN", srv.URL)
+	tg := &Telegram{
+		client: client,
+		logger: discardLogger(),
+		config: Config{
+			StreamFlushInterval: 50 * time.Millisecond,
+		},
+	}
+
+	stream := make(chan string, 10)
+	stream <- "Here is **bold** text"
+	close(stream)
+
+	chat := message.Chat{ID: "100", Type: message.ChatDM}
+	err := tg.SendStream(context.Background(), chat, stream)
+	if err != nil {
+		t.Fatalf("SendStream() error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(edits) == 0 {
+		t.Fatal("expected at least one editMessageText call")
+	}
+
+	last := edits[len(edits)-1]
+	if last.ParseMode != "MarkdownV2" {
+		t.Errorf("ParseMode = %q, want %q", last.ParseMode, "MarkdownV2")
+	}
+
+	// FormatMarkdownV2 converts **bold** to *bold* and escapes surrounding text.
+	want := FormatMarkdownV2("Here is **bold** text")
+	if last.Text != want {
+		t.Errorf("text = %q, want %q", last.Text, want)
 	}
 }
 
