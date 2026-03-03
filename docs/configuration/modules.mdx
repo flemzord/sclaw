@@ -75,6 +75,35 @@ modules:
 Use `api_key_env` instead of `api_key` if you prefer to reference the environment variable by name rather than expanding it inline. This can be useful when the same config is shared across environments.
 </Tip>
 
+## provider.openai_responses
+
+Connects to OpenAI's Responses API via native WebSocket streaming. Lower latency than REST+SSE thanks to persistent connections.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `api_key` | string | — | API key. One of `api_key` or `api_key_env` is **required**. |
+| `api_key_env` | string | — | Environment variable name containing the API key. |
+| `model` | string | — | Model identifier (e.g., `"gpt-4o"`). **Required.** |
+| `context_window` | int | `128000` | Maximum context window size in tokens. |
+| `max_output_tokens` | int | `0` | Maximum tokens to generate (0 = provider default). |
+| `ws_endpoint` | string | `"wss://api.openai.com/v1/responses"` | WebSocket endpoint URL (must be ws or wss). |
+| `headers` | map | — | Extra HTTP headers sent during WebSocket handshake. |
+| `dial_timeout` | duration | `10s` | Timeout for establishing a WebSocket connection. |
+| `conn_max_age` | duration | `55m` | Maximum connection lifetime before recycling. |
+
+```yaml
+modules:
+  provider.openai_responses:
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o"
+    context_window: 128000
+    max_output_tokens: 4096
+```
+
+<Tip>
+Use `provider.openai_responses` for direct OpenAI access with lower latency. Use `provider.openai_compatible` for third-party APIs (Ollama, Azure, vLLM, etc.) that implement the Chat Completions interface.
+</Tip>
+
 ## memory.sqlite
 
 Provides SQLite-backed persistent conversation history and long-term memory.

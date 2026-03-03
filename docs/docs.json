@@ -73,6 +73,7 @@
             "pages": [
               "modules/channels/telegram",
               "modules/providers/openai-compatible",
+              "modules/providers/openai-responses",
               "modules/memory/sqlite"
             ]
           },

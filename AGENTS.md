@@ -40,6 +40,8 @@ pkg/                  → Public reusable packages
   pkg/app/            → Shared entry point (Run, ResolveConfigPath)
   pkg/message/        → Platform-agnostic message model
 modules/              → Configurable modules (side-effect imports)
+  modules/provider/openai_compatible/ → REST+SSE Chat Completions provider
+  modules/provider/openai_responses/  → WebSocket Responses API provider
   modules/tool/shell/       → Configurable exec tool (tool.shell)
   modules/tool/file_read/   → Configurable read_file tool (tool.file_read)
   modules/tool/file_write/  → Configurable write_file tool (tool.file_write)
