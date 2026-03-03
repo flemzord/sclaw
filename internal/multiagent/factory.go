@@ -391,6 +391,88 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 	return workspace.FormatSkillsForPrompt(active), nil
 }
 
+// ForCronJob builds an agent.Loop for cron execution with allow-all policy.
+// Unlike ForSession, it does not require a router.Session and uses a permissive
+// policy (all tools auto-approved) since cron jobs are system-initiated.
+func (f *Factory) ForCronJob(agentID string, toolFilter []string, loopOverrides agent.LoopConfig) (*agent.Loop, string, error) {
+	agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
+	if !ok {
+		return nil, "", fmt.Errorf("%w: %q", ErrAgentNotFound, agentID)
+	}
+
+	p := f.cfg.DefaultProvider
+
+	// Build tool registry filtered by agent allowlist.
+	toolReg := f.buildToolRegistry(agentCfg)
+
+	// Apply additional cron-specific tool filter (intersection).
+	if len(toolFilter) > 0 {
+		filtered := tool.NewRegistry()
+		for _, name := range toolFilter {
+			if t, err := toolReg.Get(name); err == nil {
+				_ = filtered.Register(t)
+			}
+		}
+		toolReg = filtered
+	}
+
+	// Wire audit logger but NOT rate limiter (cron = system, not user).
+	if f.cfg.AuditLogger != nil {
+		toolReg.SetAuditLogger(f.cfg.AuditLogger)
+	}
+
+	// Build path filter for allowed directories outside workspace.
+	var pathFilter *security.PathFilter
+	if len(agentCfg.AllowedDirs) > 0 {
+		dirs := make([]security.AllowedDir, len(agentCfg.AllowedDirs))
+		for i, d := range agentCfg.AllowedDirs {
+			dirs[i] = security.AllowedDir{
+				Path: d.Path,
+				Mode: security.PathAccessMode(d.Mode),
+			}
+		}
+		pathFilter = security.NewPathFilter(security.PathFilterConfig{AllowedDirs: dirs})
+	}
+
+	// Build executor with allow-all policy (cron jobs need no user approval).
+	executor := agent.NewToolExecutor(agent.ToolExecutorConfig{
+		Registry: toolReg,
+		PolicyCfg: tool.PolicyConfig{
+			DM: tool.Policy{Default: tool.ApprovalAllow},
+		},
+		PolicyCtx: tool.PolicyContextDM,
+		Env: tool.ExecutionEnv{
+			Workspace:    agentCfg.Workspace,
+			DataDir:      agentCfg.DataDir,
+			SanitizedEnv: f.cfg.SanitizedEnv,
+			URLFilter:    f.cfg.URLFilter,
+			PathFilter:   pathFilter,
+		},
+	})
+
+	// Build loop config: agent defaults merged with cron overrides.
+	loopCfg := f.buildLoopConfig(agentCfg)
+	if loopOverrides.MaxIterations > 0 {
+		loopCfg.MaxIterations = loopOverrides.MaxIterations
+	}
+	if loopOverrides.Timeout > 0 {
+		loopCfg.Timeout = loopOverrides.Timeout
+	}
+
+	// Resolve system prompt.
+	systemPrompt, err := f.ResolveSoul(agentID)
+	if err != nil {
+		return nil, "", fmt.Errorf("multiagent: resolving soul for cron %q: %w", agentID, err)
+	}
+
+	return agent.NewLoop(p, executor, loopCfg), systemPrompt, nil
+}
+
+// BuildCronLoop implements cron.LoopBuilder.
+func (f *Factory) BuildCronLoop(agentID string, toolFilter []string, loopOverrides agent.LoopConfig) (*agent.Loop, string, error) {
+	return f.ForCronJob(agentID, toolFilter, loopOverrides)
+}
+
 // Reload atomically swaps the Registry and selectively invalidates caches
 // for agents whose configuration has changed. In-flight messages that already
 // loaded the old Registry via atomic.Load continue unaffected; the next

@@ -27,6 +27,7 @@ func (w *Workspace) EnsureStructure() error {
 		w.MemoryDir(),
 		w.SessionsDir(),
 		w.DataDir(),
+		w.CronsDir(),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -59,4 +60,9 @@ func (w *Workspace) SessionsDir() string {
 // DataDir returns the path to the data directory.
 func (w *Workspace) DataDir() string {
 	return filepath.Join(w.Root, "data")
+}
+
+// CronsDir returns the path to the prompt crons directory.
+func (w *Workspace) CronsDir() string {
+	return filepath.Join(w.Root, "crons")
 }

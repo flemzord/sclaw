@@ -19,7 +19,7 @@ internal/             → Private packages (not importable)
   internal/config/    → Configuration loading and validation
   internal/context/   → LLM context management (token budget, compaction)
   internal/core/      → Module system and registry
-  internal/cron/      → Scheduled tasks
+  internal/cron/      → Scheduled tasks + prompt cron system
   internal/gateway/   → HTTP server (admin, webhooks, health)
   internal/hook/      → Message pipeline hooks (audit, filtering)
   internal/memory/    → Conversation history management
@@ -33,6 +33,7 @@ internal/             → Private packages (not importable)
   internal/subagent/  → Ephemeral sub-agent sessions
   internal/tool/      → Tool registry + approval system
   internal/tool/configtool/ → Runtime config tools (get, validate, patch, apply)
+  internal/tool/crontool/   → Prompt cron CRUD tools (list, get, create, update, delete)
   internal/workspace/ → Working directory management
 pkg/                  → Public reusable packages
   pkg/app/            → Shared entry point (Run, ResolveConfigPath)
@@ -256,6 +257,59 @@ Write tools (`patch`, `apply`) require a `base_hash` obtained from `config_get`.
 - Config path is fixed by closure — the agent cannot target arbitrary files
 - Max config/patch size: 1 MiB
 - Secrets are redacted in `config_get` output via `security.Redactor.RedactMap()`
+
+## Prompt Crons (Scheduled Prompts)
+
+Agents can define scheduled prompts as JSON files in `{agent_data_dir}/crons/`. Each prompt cron runs through the full agent loop (with tools) on a cron schedule.
+
+### File Format (`crons/{name}.json`)
+
+```json
+{
+  "name": "tools-analyzer",
+  "description": "Analyze available tools and suggest improvements",
+  "schedule": "0 9 * * *",
+  "enabled": true,
+  "prompt": "Analyze the available tools and provide a summary...",
+  "tools": ["read_file", "exec"],
+  "loop": { "max_iterations": 5, "timeout": "2m" },
+  "output": { "channel": "channel.telegram", "chat_id": "123456789" }
+}
+```
+
+- `output` is optional. If absent → logging only + result file.
+- If `output.channel` + `output.chat_id` are defined → result is sent to that channel.
+
+### Result Storage
+
+Each execution writes to `{data_dir}/crons/results/{name}.json` (last result only, overwritten).
+
+### CRUD Tools
+
+| Tool | Scope | Default Policy | Description |
+|------|-------|----------------|-------------|
+| `cron_list` | `read_only` | `allow` | List all prompt cron definitions |
+| `cron_get` | `read_only` | `allow` | Get definition + last result |
+| `cron_create` | `read_write` | `ask` | Create a new prompt cron |
+| `cron_update` | `read_write` | `ask` | Update an existing prompt cron |
+| `cron_delete` | `read_write` | `ask` | Delete a prompt cron and its result |
+
+### Key Design Decisions
+
+- Cron jobs use **allow-all policy** (no user approval needed) since they are system-initiated
+- Audit logger is wired but **rate limiter is not** (cron = system, not user)
+- CRUD tools trigger a **hot-reload** via `reload.Handler` after mutations
+- Loop config merges: agent defaults ← cron overrides (MaxIterations, Timeout)
+- `LoopBuilder` and `OutputSender` interfaces break circular dependency between cron ↔ multiagent/channel
+
+### Key Packages
+
+- `internal/cron/promptcron.go` — `PromptCronDef`, `PromptCronResult`, `PromptJob`, `LoopBuilder`, `OutputSender`
+- `internal/cron/scanner.go` — `ScanPromptCrons(dir)`
+- `internal/tool/crontool/` — CRUD tools (list, get, create, update, delete)
+- `internal/workspace/workspace.go` — `CronsDir()` method
+- `internal/multiagent/factory.go` — `ForCronJob()`, `BuildCronLoop()`
+- `pkg/app/wire.go` — wiring, `cronOutputAdapter`
 
 ## CI/CD
 

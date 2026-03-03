@@ -20,6 +20,8 @@ import (
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/internal/tool/builtin"
 	"github.com/flemzord/sclaw/internal/tool/configtool"
+	"github.com/flemzord/sclaw/internal/tool/crontool"
+	"github.com/flemzord/sclaw/pkg/message"
 	"github.com/flemzord/sclaw/skills"
 )
 
@@ -265,6 +267,24 @@ func wireRouter(
 	// Register the default provider for use by cron jobs (e.g. fact extraction).
 	appCtx.RegisterService("provider.default", defaultProvider)
 
+	// Register factory and dispatcher for prompt cron wiring.
+	appCtx.RegisterService("multiagent.factory", factory)
+	appCtx.RegisterService("channel.dispatcher", dispatcher)
+
+	// Register cron CRUD tools for runtime cron management.
+	if err := crontool.RegisterAll(globalTools, crontool.Deps{
+		ReloadFn: func() error {
+			if svc, ok := appCtx.GetService("reload.handler"); ok {
+				if h, ok := svc.(*reload.Handler); ok {
+					return h.HandleReload(context.Background(), cfgPath)
+				}
+			}
+			return nil
+		},
+	}); err != nil {
+		return fmt.Errorf("registering cron tools: %w", err)
+	}
+
 	logger.Info("router: wired", "channels", len(channels))
 	return nil
 }
@@ -288,6 +308,19 @@ func (a *sessionRangerAdapter) Range(fn func(sessionID, agentID string) bool) {
 	})
 }
 
+// cronOutputAdapter bridges channel.Dispatcher to cron.OutputSender.
+type cronOutputAdapter struct {
+	dispatcher *channel.Dispatcher
+}
+
+func (a *cronOutputAdapter) SendCronOutput(ctx context.Context, ch, chatID, text string) error {
+	return a.dispatcher.Send(ctx, message.OutboundMessage{
+		Channel: ch,
+		Chat:    message.Chat{ID: chatID, Type: message.ChatDM},
+		Blocks:  []message.ContentBlock{message.NewTextBlock(text)},
+	})
+}
+
 // schedulerModule wraps a *cron.Scheduler to satisfy core.Module, core.Starter,
 // core.Stopper, and core.Reloader, so the scheduler participates in the App lifecycle.
 type schedulerModule struct {
@@ -299,6 +332,8 @@ type schedulerModule struct {
 	historyStore memory.HistoryStore
 	memoryStore  memory.Store
 	extractor    memory.FactExtractor
+	loopBuilder  cron.LoopBuilder
+	outputSender cron.OutputSender
 }
 
 func (m *schedulerModule) ModuleInfo() core.ModuleInfo {
@@ -379,6 +414,28 @@ func (m *schedulerModule) Reload(ctx *core.AppContext) error {
 		}); err != nil {
 			return fmt.Errorf("cron: registering memory compaction for agent %s: %w", agentID, err)
 		}
+
+		// Register prompt crons for this agent.
+		if m.loopBuilder != nil {
+			cronsDir := cron.CronsDir(cfg.DataDir)
+			defs, errs := cron.ScanPromptCrons(cronsDir)
+			for _, e := range errs {
+				m.logger.Error("cron: invalid prompt cron", "agent", agentID, "error", e)
+			}
+			for _, def := range defs {
+				if err := newScheduler.RegisterJob(&cron.PromptJob{
+					Def:     def,
+					AgentID: agentID,
+					Builder: m.loopBuilder,
+					Sender:  m.outputSender,
+					DataDir: cfg.DataDir,
+					Logger:  m.logger,
+				}); err != nil {
+					m.logger.Error("cron: registering prompt cron",
+						"agent", agentID, "cron", def.Name, "error", err)
+				}
+			}
+		}
 	}
 
 	if err := newScheduler.Start(); err != nil {
@@ -436,6 +493,18 @@ func wireCron(
 		registry, _ = svc.(*multiagent.Registry)
 	}
 
+	// Resolve LoopBuilder and OutputSender for prompt crons.
+	var loopBuilder cron.LoopBuilder
+	if svc, ok := appCtx.GetService("multiagent.factory"); ok {
+		loopBuilder, _ = svc.(cron.LoopBuilder)
+	}
+	var outputSender cron.OutputSender
+	if svc, ok := appCtx.GetService("channel.dispatcher"); ok {
+		if d, ok := svc.(*channel.Dispatcher); ok {
+			outputSender = &cronOutputAdapter{dispatcher: d}
+		}
+	}
+
 	if registry != nil {
 		// Per-agent jobs: one set of jobs per registered agent.
 		for _, agentID := range registry.AgentIDs() {
@@ -473,6 +542,28 @@ func wireCron(
 			}); err != nil {
 				return fmt.Errorf("cron: registering memory compaction for agent %s: %w", agentID, err)
 			}
+
+			// Register prompt crons for this agent.
+			if loopBuilder != nil {
+				cronsDir := cron.CronsDir(cfg.DataDir)
+				defs, errs := cron.ScanPromptCrons(cronsDir)
+				for _, e := range errs {
+					logger.Error("cron: invalid prompt cron", "agent", agentID, "error", e)
+				}
+				for _, def := range defs {
+					if err := s.RegisterJob(&cron.PromptJob{
+						Def:     def,
+						AgentID: agentID,
+						Builder: loopBuilder,
+						Sender:  outputSender,
+						DataDir: cfg.DataDir,
+						Logger:  logger,
+					}); err != nil {
+						logger.Error("cron: registering prompt cron",
+							"agent", agentID, "cron", def.Name, "error", err)
+					}
+				}
+			}
 		}
 	} else {
 		// Single-agent fallback: global jobs with defaults.
@@ -509,6 +600,8 @@ func wireCron(
 		historyStore: historyStore,
 		memoryStore:  memoryStore,
 		extractor:    extractor,
+		loopBuilder:  loopBuilder,
+		outputSender: outputSender,
 	})
 	logger.Info("cron: wired")
 	return nil
