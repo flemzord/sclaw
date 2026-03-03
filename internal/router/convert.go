@@ -27,6 +27,13 @@ type SoulResolver interface {
 	ResolveSoul(agentID string) (string, error)
 }
 
+// SkillResolver returns formatted skill sections for a given agent.
+// The result is a markdown string ready to append to the system prompt.
+// Returns an empty string if no skills are active.
+type SkillResolver interface {
+	ResolveSkills(agentID, userMessage string) (string, error)
+}
+
 // persistenceKey derives a stable key from a SessionKey for history persistence.
 // The key survives session recreation (new UUID) because it is based on the
 // immutable channel/chat/thread triple.

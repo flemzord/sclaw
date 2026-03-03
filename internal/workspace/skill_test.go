@@ -154,3 +154,51 @@ func TestLoadSkillsFromDir_MissingDir(t *testing.T) {
 		t.Errorf("got %v, want nil", skills)
 	}
 }
+
+func TestExcludeByName_RemovesMatchingSkills(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{Meta: SkillMeta{Name: "alpha"}},
+		{Meta: SkillMeta{Name: "beta"}},
+		{Meta: SkillMeta{Name: "gamma"}},
+	}
+
+	result := ExcludeByName(skills, []string{"beta"})
+	if len(result) != 2 {
+		t.Fatalf("got %d skills, want 2", len(result))
+	}
+	for _, s := range result {
+		if s.Meta.Name == "beta" {
+			t.Error("beta should have been excluded")
+		}
+	}
+}
+
+func TestExcludeByName_EmptyExcludeList(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{Meta: SkillMeta{Name: "alpha"}},
+		{Meta: SkillMeta{Name: "beta"}},
+	}
+
+	result := ExcludeByName(skills, nil)
+	if len(result) != len(skills) {
+		t.Errorf("got %d skills, want %d (empty exclude list should be no-op)", len(result), len(skills))
+	}
+}
+
+func TestExcludeByName_NoMatches(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{Meta: SkillMeta{Name: "alpha"}},
+		{Meta: SkillMeta{Name: "beta"}},
+	}
+
+	result := ExcludeByName(skills, []string{"nonexistent"})
+	if len(result) != 2 {
+		t.Errorf("got %d skills, want 2 (no matches should keep all)", len(result))
+	}
+}

@@ -1,0 +1,192 @@
+---
+title: Skills
+description: "Extend agent capabilities with reusable skill files"
+icon: "wand-magic-sparkles"
+---
+
+Skills are reusable Markdown files that inject domain-specific instructions into the agent's system prompt. They allow you to package expertise — code review checklists, writing guidelines, debugging playbooks — and activate them conditionally based on trigger rules, keywords, and available tools.
+
+## How It Works
+
+On each inbound message, the pipeline resolves active skills for the agent and appends them to the system prompt (after the [SOUL.md](/concepts/soul) personality). Skills are activated based on their trigger mode, keyword matches, and whether the agent has the required tools.
+
+```
+System Prompt = SOUL.md + Active Skills
+```
+
+## Skill File Format
+
+A skill file is a Markdown file with YAML frontmatter delimited by `---`:
+
+```markdown
+---
+name: code-review
+description: Reviews code for quality issues
+trigger: auto
+keywords: [review, code quality, PR]
+tools_required: [read_file, exec]
+---
+
+## Code Review Checklist
+
+When reviewing code:
+1. Check for security vulnerabilities (SQL injection, XSS)
+2. Verify error handling covers edge cases
+3. Ensure tests exist for new functionality
+4. Look for performance bottlenecks
+```
+
+### Frontmatter Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | yes | — | Unique identifier for the skill. |
+| `description` | string | no | — | Human-readable description (shown in prompt header). |
+| `trigger` | string | no | `manual` | Activation mode: `always`, `auto`, or `manual`. |
+| `keywords` | list | no | — | Keywords that activate `auto` skills (case-insensitive). |
+| `tools_required` | list | yes | — | Tools the agent must have for this skill to activate. |
+
+<Warning>
+Skills with no `tools_required` are silently skipped. This prevents skills from activating when the agent lacks the tools to act on them.
+</Warning>
+
+## Trigger Modes
+
+| Mode | Behavior |
+|------|----------|
+| `always` | Active on every message, as long as required tools are available. |
+| `auto` | Active when any keyword matches the user's message. |
+| `manual` | Only active when explicitly requested (future: slash commands). |
+
+### Activation Priority
+
+Skills are activated in three passes, preserving declaration order:
+
+1. **Always** skills — included unconditionally (tool check only)
+2. **Auto** skills — included when keywords match the user message
+3. **Manual** skills — included only when explicitly activated
+
+## File Locations
+
+### Global Skills
+
+Global skills are shared across **all agents**:
+
+```
+{data_dir}/skills/*.md
+```
+
+Any `.md` file in this directory is parsed as a skill. Invalid files (missing frontmatter, missing name) are silently skipped.
+
+### Per-Agent Skills
+
+Each agent can have dedicated skills in its own directory:
+
+```
+{data_dir}/agents/{agent_name}/skills/*.md
+```
+
+Per-agent skills are only available to that specific agent.
+
+### Merge Order
+
+When both global and per-agent skills exist, they are merged in this order:
+
+1. **Global skills** (filtered by `exclude_skills`)
+2. **Per-agent skills** (never filtered by `exclude_skills`)
+
+<Tip>
+Use global skills for organization-wide standards (security policies, coding guidelines) and per-agent skills for role-specific instructions (support workflows, creative writing rules).
+</Tip>
+
+## Excluding Global Skills
+
+Agents can opt out of specific global skills using `exclude_skills` in the agent configuration:
+
+```yaml
+agents:
+  creative:
+    exclude_skills: ["code-review", "security-audit"]
+    routing:
+      channels: ["#brainstorm"]
+```
+
+This removes the listed global skills for this agent only. Other agents are unaffected.
+
+<Note>
+`exclude_skills` only filters **global** skills. Per-agent skills in the agent's own `skills/` directory are never excluded — the agent has full control over its own skills.
+</Note>
+
+## Examples
+
+### Global Skill: Security Policy
+
+File: `{data_dir}/skills/security-policy.md`
+
+```markdown
+---
+name: security-policy
+description: Enforces security best practices
+trigger: always
+tools_required: [exec]
+---
+
+## Security Rules
+
+- Never execute commands that modify production databases.
+- Always sanitize user input before passing to shell commands.
+- Flag any command containing `rm -rf`, `DROP TABLE`, or `--no-verify`.
+```
+
+### Per-Agent Skill: Code Review
+
+File: `{data_dir}/agents/coder/skills/review.md`
+
+```markdown
+---
+name: code-review
+description: Code review guidelines for the coder agent
+trigger: auto
+keywords: [review, PR, pull request, code quality]
+tools_required: [read_file]
+---
+
+When reviewing code:
+1. Focus on correctness, not style preferences.
+2. Check error handling at system boundaries.
+3. Verify tests cover the happy path and at least one error case.
+4. Flag any TODO comments without associated tracking issues.
+```
+
+### Multi-Agent Setup
+
+```yaml
+agents:
+  main:
+    routing:
+      default: true
+    # Gets all global skills, no per-agent skills
+
+  coder:
+    tools: ["exec", "read_file", "write_file"]
+    exclude_skills: ["creative-writing"]
+    routing:
+      users: ["dev-123"]
+    # Gets global skills (minus creative-writing) + coder-specific skills
+
+  creative:
+    exclude_skills: ["code-review", "security-audit"]
+    routing:
+      channels: ["#brainstorm"]
+    # Gets global skills (minus code-review & security-audit) + creative-specific skills
+```
+
+## Token Budget
+
+When the system prompt grows large due to many active skills, the pruning system automatically removes lower-priority skills to fit within the token budget:
+
+1. **Auto** skills are removed first (last to first)
+2. **Manual** skills are removed next
+3. **Always** skills are never pruned
+
+This ensures critical always-on skills (like security policies) remain active even under token pressure.

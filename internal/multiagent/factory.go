@@ -42,6 +42,10 @@ type FactoryConfig struct {
 	// variables passed to tools that spawn subprocesses.
 	SanitizedEnv []string
 
+	// GlobalSkillsDir is the path to the global skills directory.
+	// Skills in this directory are available to all agents by default.
+	GlobalSkillsDir string
+
 	// HistoryStore, if non-nil, is used for all agents instead of
 	// opening per-agent SQLite databases. Provided by the active
 	// memory module (e.g., memory.obsidian or memory.sqlite).
@@ -67,6 +71,7 @@ var (
 	_ router.AgentFactory    = (*Factory)(nil)
 	_ router.HistoryResolver = (*Factory)(nil)
 	_ router.SoulResolver    = (*Factory)(nil)
+	_ router.SkillResolver   = (*Factory)(nil)
 )
 
 // NewFactory creates a Factory from the given configuration.
@@ -274,6 +279,52 @@ func (f *Factory) ResolveSoul(agentID string) (string, error) {
 	loader := workspace.NewSoulLoader(soulPath)
 	f.souls[agentID] = loader
 	return loader.Load()
+}
+
+// ResolveSkills returns the formatted skill section for the given agent.
+// It loads global skills from GlobalSkillsDir, per-agent skills from the
+// agent's data directory, filters excluded global skills, activates based
+// on trigger rules and available tools, then formats for the system prompt.
+func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
+	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
+	if !ok {
+		return "", nil
+	}
+
+	// Load global skills.
+	globalSkills, err := workspace.LoadSkillsFromDir(f.cfg.GlobalSkillsDir)
+	if err != nil {
+		return "", fmt.Errorf("multiagent: loading global skills: %w", err)
+	}
+
+	// Load per-agent skills.
+	agentSkillsDir := filepath.Join(agentCfg.DataDir, "skills")
+	agentSkills, err := workspace.LoadSkillsFromDir(agentSkillsDir)
+	if err != nil {
+		return "", fmt.Errorf("multiagent: loading agent skills for %q: %w", agentID, err)
+	}
+
+	// Filter excluded global skills.
+	globalSkills = workspace.ExcludeByName(globalSkills, agentCfg.ExcludeSkills)
+
+	// Merge: filtered global + per-agent.
+	allSkills := append(globalSkills, agentSkills...)
+	if len(allSkills) == 0 {
+		return "", nil
+	}
+
+	// Get available tool names.
+	toolReg := f.buildToolRegistry(agentCfg)
+	toolNames := toolReg.Names()
+
+	// Activate skills based on trigger rules and available tools.
+	active := workspace.NewSkillActivator().Activate(workspace.ActivateRequest{
+		Skills:         allSkills,
+		UserMessage:    userMessage,
+		AvailableTools: toolNames,
+	})
+
+	return workspace.FormatSkillsForPrompt(active), nil
 }
 
 // Close closes all SQLite databases opened by ResolveHistory.

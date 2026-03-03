@@ -14,6 +14,7 @@ The `agents` section enables multi-agent mode. Each key is an agent name, and it
 | `workspace` | string | — | Working directory for tool execution. |
 | `provider` | string | — | Module ID of the provider to use (must exist in `modules`). |
 | `tools` | list | — | Tool names available to this agent. |
+| `exclude_skills` | list | — | Global skill names to exclude for this agent. |
 | `streaming` | bool | `true` | Stream LLM responses progressively to the channel. |
 | `memory` | object | — | Memory settings for this agent. |
 | `routing` | object | — | Routing rules for message dispatch. |
@@ -120,5 +121,5 @@ In this setup:
 - **coder** takes over when user `123456789` sends a message, with access to code execution tools and a longer iteration limit
 
 <Note>
-Each agent gets its own data directory, SOUL.md personality file, and (optionally) its own SQLite memory database. See [Agent Personality](/concepts/soul) and [Memory System](/concepts/memory) for details.
+Each agent gets its own data directory, SOUL.md personality file, skills directory, and (optionally) its own SQLite memory database. See [Agent Personality](/concepts/soul), [Skills](/concepts/skills), and [Memory System](/concepts/memory) for details.
 </Note>

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1192,6 +1193,104 @@ func TestPipeline_Streaming_MidStreamError(t *testing.T) {
 	sent := sender.sentMessages()
 	if len(sent) != 1 {
 		t.Fatalf("error sender called %d times, want 1", len(sent))
+	}
+}
+
+// testSkillResolver is a simple in-test mock for SkillResolver.
+type testSkillResolver struct {
+	section string
+	err     error
+}
+
+func (r *testSkillResolver) ResolveSkills(_, _ string) (string, error) {
+	return r.section, r.err
+}
+
+func TestPipeline_SkillResolver_InjectsSkills(t *testing.T) {
+	t.Parallel()
+
+	var capturedMessages []provider.LLMMessage
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, req provider.CompletionRequest) (provider.CompletionResponse, error) {
+			capturedMessages = req.Messages
+			return provider.CompletionResponse{
+				Content:      "OK",
+				FinishReason: provider.FinishReasonStop,
+			}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	skillResolver := &testSkillResolver{section: "## Active Skills\n\n### my-skill\n\nDo stuff."}
+
+	agentFactory := &agentIDSettingFactory{
+		inner:   &testAgentFactory{loop: loop},
+		agentID: "bot",
+	}
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    agentFactory,
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		SkillResolver:   skillResolver,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if len(capturedMessages) < 1 {
+		t.Fatal("expected at least 1 message sent to provider")
+	}
+	systemPrompt := capturedMessages[0].Content
+	if !strings.Contains(systemPrompt, "## Active Skills") {
+		t.Errorf("system prompt missing skill section:\n%s", systemPrompt)
+	}
+	if !strings.Contains(systemPrompt, "my-skill") {
+		t.Errorf("system prompt missing my-skill:\n%s", systemPrompt)
+	}
+}
+
+func TestPipeline_SkillResolver_Nil(t *testing.T) {
+	t.Parallel()
+
+	mockProv := newTestMockProvider("OK")
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	// SkillResolver is nil — pipeline should not panic (backward compat).
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+		SkillResolver:   nil,
+	})
+
+	env := testEnvelope()
+	result := pipeline.Execute(context.Background(), env)
+
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Response == nil {
+		t.Fatal("expected non-nil response")
 	}
 }
 

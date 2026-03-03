@@ -53,6 +53,10 @@ type Config struct {
 	// SoulResolver, if non-nil, provides per-agent system prompts from SOUL.md.
 	// Nil means use the default prompt (backward compatible).
 	SoulResolver SoulResolver
+
+	// SkillResolver, if non-nil, provides per-agent skill sections appended
+	// to the system prompt. Nil means no skills (backward compatible).
+	SkillResolver SkillResolver
 }
 
 // withDefaults returns a copy of the config with zero values replaced by defaults.
@@ -124,6 +128,7 @@ func NewRouter(cfg Config) (*Router, error) {
 		HookPipeline:    cfg.HookPipeline,
 		HistoryResolver: cfg.HistoryResolver,
 		SoulResolver:    cfg.SoulResolver,
+		SkillResolver:   cfg.SkillResolver,
 	})
 
 	return &Router{

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/flemzord/sclaw/internal/memory"
@@ -682,5 +683,172 @@ func TestFactory_ResolveSoul_UnknownAgent(t *testing.T) {
 	}
 	if prompt != "You are a helpful assistant." {
 		t.Errorf("prompt = %q, want default for unknown agent", prompt)
+	}
+}
+
+// writeSkillFile creates a skill .md file with trigger "always" in the given directory.
+func writeSkillFile(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", dir, err)
+	}
+	content := "---\nname: " + name + "\ntrigger: always\ntools_required: [search]\n---\nSkill body for " + name + ".\n"
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+func TestFactory_ResolveSkills_MergesGlobalAndPerAgent(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "skills")
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+
+	writeSkillFile(t, globalDir, "global-skill")
+	writeSkillFile(t, filepath.Join(agentDataDir, "skills"), "agent-skill")
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: agentDataDir,
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		GlobalSkillsDir: globalDir,
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if !strings.Contains(result, "global-skill") {
+		t.Errorf("result missing global-skill:\n%s", result)
+	}
+	if !strings.Contains(result, "agent-skill") {
+		t.Errorf("result missing agent-skill:\n%s", result)
+	}
+}
+
+func TestFactory_ResolveSkills_ExcludeSkillsFiltersGlobal(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "skills")
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+
+	writeSkillFile(t, globalDir, "keep-me")
+	writeSkillFile(t, globalDir, "drop-me")
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir:       agentDataDir,
+			ExcludeSkills: []string{"drop-me"},
+			Routing:       RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		GlobalSkillsDir: globalDir,
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if !strings.Contains(result, "keep-me") {
+		t.Errorf("result missing keep-me:\n%s", result)
+	}
+	if strings.Contains(result, "drop-me") {
+		t.Errorf("result should not contain drop-me:\n%s", result)
+	}
+}
+
+func TestFactory_ResolveSkills_PerAgentNotAffectedByExclude(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "skills")
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+
+	// Per-agent skill with same name as an excluded skill — should NOT be excluded.
+	writeSkillFile(t, filepath.Join(agentDataDir, "skills"), "my-skill")
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir:       agentDataDir,
+			ExcludeSkills: []string{"my-skill"},
+			Routing:       RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		GlobalSkillsDir: globalDir,
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if !strings.Contains(result, "my-skill") {
+		t.Errorf("per-agent skill should not be affected by exclude_skills:\n%s", result)
+	}
+}
+
+func TestFactory_ResolveSkills_EmptyDirs(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+	if err := os.MkdirAll(agentDataDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: agentDataDir,
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		GlobalSkillsDir: filepath.Join(tmpDir, "skills"),
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty result for empty dirs, got %q", result)
 	}
 }

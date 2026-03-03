@@ -113,6 +113,22 @@ func LoadSkillsFromDir(dir string) ([]Skill, error) {
 	return skills, nil
 }
 
+// ExcludeByName filters out skills whose Meta.Name is in the exclusion set.
+// Returns a new slice; the original is not modified.
+func ExcludeByName(skills []Skill, names []string) []Skill {
+	if len(names) == 0 {
+		return skills
+	}
+	exclude := makeStringSet(names)
+	var result []Skill
+	for i := range skills {
+		if !exclude[skills[i].Meta.Name] {
+			result = append(result, skills[i])
+		}
+	}
+	return result
+}
+
 // splitFrontmatter splits content into YAML frontmatter and body.
 // The content must begin with "---\n" and have a closing "---\n".
 func splitFrontmatter(content string) (front, body string, err error) {

@@ -13,15 +13,16 @@ import (
 
 // AgentConfig holds the configuration for a single agent.
 type AgentConfig struct {
-	DataDir   string        `yaml:"data_dir"`
-	Workspace string        `yaml:"workspace"`
-	Provider  string        `yaml:"provider"`
-	Tools     []string      `yaml:"tools"`
-	Streaming *bool         `yaml:"streaming"`
-	Memory    MemoryConfig  `yaml:"memory"`
-	Routing   RoutingConfig `yaml:"routing"`
-	Loop      LoopOverrides `yaml:"loop"`
-	Cron      CronConfig    `yaml:"cron"`
+	DataDir       string        `yaml:"data_dir"`
+	Workspace     string        `yaml:"workspace"`
+	Provider      string        `yaml:"provider"`
+	Tools         []string      `yaml:"tools"`
+	ExcludeSkills []string      `yaml:"exclude_skills"`
+	Streaming     *bool         `yaml:"streaming"`
+	Memory        MemoryConfig  `yaml:"memory"`
+	Routing       RoutingConfig `yaml:"routing"`
+	Loop          LoopOverrides `yaml:"loop"`
+	Cron          CronConfig    `yaml:"cron"`
 }
 
 // IsStreamingEnabled returns whether streaming is enabled for this agent.

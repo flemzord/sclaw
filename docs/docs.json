@@ -59,6 +59,7 @@
               "concepts/agent-loop",
               "concepts/memory",
               "concepts/soul",
+              "concepts/skills",
               "concepts/tools",
               "concepts/builtin-tools",
               "concepts/routing",

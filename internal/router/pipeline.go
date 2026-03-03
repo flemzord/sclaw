@@ -58,6 +58,10 @@ type PipelineConfig struct {
 	// SoulResolver, if non-nil, provides per-agent system prompts loaded
 	// from SOUL.md files. Nil means use the default prompt (backward compatible).
 	SoulResolver SoulResolver
+
+	// SkillResolver, if non-nil, provides per-agent skill sections that are
+	// appended to the system prompt. Nil means no skills (backward compatible).
+	SkillResolver SkillResolver
 }
 
 // PipelineResult contains the outcome of pipeline execution.
@@ -218,6 +222,17 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 				"session_id", session.ID, "agent_id", session.AgentID, "error", err)
 		}
 	}
+
+	// Step 9a: Skill resolution — append active skills to the system prompt.
+	if p.cfg.SkillResolver != nil && session.AgentID != "" {
+		if skillSection, err := p.cfg.SkillResolver.ResolveSkills(session.AgentID, env.Message.TextContent()); err == nil && skillSection != "" {
+			systemPrompt += "\n\n" + skillSection
+		} else if err != nil {
+			logger.Warn("pipeline: failed to resolve skills",
+				"session_id", session.ID, "agent_id", session.AgentID, "error", err)
+		}
+	}
+
 	req := agent.Request{
 		Messages:     session.History,
 		SystemPrompt: systemPrompt,
