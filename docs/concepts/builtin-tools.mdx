@@ -275,13 +275,44 @@ security:
 
 See [Tools](/concepts/tools) for the full approval system documentation.
 
+## Module Migration
+
+The three core tools (`exec`, `read_file`, `write_file`) are now available as configurable modules in addition to their built-in versions. This allows you to customize timeouts, size limits, and approval policies without modifying code.
+
+| Built-in Tool | Module ID | Module Package |
+|---------------|-----------|----------------|
+| `exec` | `tool.shell` | `modules/tool/shell/` |
+| `read_file` | `tool.file_read` | `modules/tool/file_read/` |
+| `write_file` | `tool.file_write` | `modules/tool/file_write/` |
+
+### How It Works
+
+- **No `tool.*` modules configured** — the legacy built-in tools are used automatically. Fully backward compatible, no changes needed.
+- **Some `tool.*` modules configured** — each configured module replaces its corresponding built-in. Unconfigured tools still use builtins. For example, if only `tool.shell` is in your config, `exec` comes from the module while `read_file` and `write_file` remain built-in.
+- **All `tool.*` modules configured** — no built-in tools are loaded; everything is module-driven.
+
+```yaml
+# Example: configure all three tool modules
+modules:
+  tool.shell:
+    timeout: "1m"
+    default_policy: "ask"
+  tool.file_read:
+    max_file_size: 5242880
+  tool.file_write:
+    create_dirs: true
+```
+
+See [Module Configuration](/configuration/modules#toolshell) for the full configuration reference.
+
 ## Registration
 
-Built-in tools are registered automatically during application startup. Filesystem and exec tools are registered via `builtin.RegisterAll()`, while config tools are registered via `configtool.RegisterAll()` with their dependencies (config path, redactor, reload function). All tools are available to every agent through the global tool registry — no configuration required.
+Built-in tools are registered automatically during application startup. The wiring logic first discovers tools from `ToolProvider` modules, then fills in any gaps with built-in tools. Config tools are registered via `configtool.RegisterAll()` with their dependencies (config path, redactor, reload function). All tools are available to every agent through the global tool registry.
 
 ```go
 // internal/tool/builtin/register.go
 func RegisterAll(registry *tool.Registry) error
+func All() []tool.Tool  // Returns instances without registering
 
 // internal/tool/configtool/configtool.go
 func RegisterAll(registry *tool.Registry, deps Deps) error

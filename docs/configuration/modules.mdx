@@ -1,6 +1,6 @@
 ---
 title: Module Configuration
-description: "Configure channels, providers, and memory backends"
+description: "Configure channels, providers, memory backends, and tools"
 icon: "puzzle-piece"
 ---
 
@@ -106,3 +106,91 @@ Provides SQLite-backed persistent conversation history and long-term memory.
 <Note>
 The SQLite module uses `modernc.org/sqlite` (pure Go, no CGO required). WAL mode enables concurrent reads while maintaining write serialization.
 </Note>
+
+## tool.shell
+
+Configurable replacement for the built-in `exec` tool. When this module is active, it replaces the hardcoded exec tool with configurable timeouts, output limits, and approval policy.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `timeout` | duration | `"30s"` | Default command timeout. |
+| `max_timeout` | duration | `"10m"` | Maximum allowed timeout (caps per-command overrides). |
+| `max_output_size` | int | `1048576` | Maximum stdout+stderr captured in bytes (1 MiB). |
+| `default_policy` | string | `"allow"` | Default approval level: `"allow"`, `"ask"`, or `"deny"`. |
+
+<Tabs>
+  <Tab title="Default (zero config)">
+    ```yaml
+    modules:
+      tool.shell: {}
+    ```
+  </Tab>
+  <Tab title="Custom">
+    ```yaml
+    modules:
+      tool.shell:
+        timeout: "1m"
+        max_timeout: "5m"
+        max_output_size: 2097152
+        default_policy: "ask"
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The tool name remains `exec` for backward compatibility with existing agent configurations that reference `tools: [exec]`.
+</Note>
+
+## tool.file_read
+
+Configurable replacement for the built-in `read_file` tool. Controls the maximum file size the agent can read and the default approval policy.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_file_size` | int | `1048576` | Maximum file size in bytes to read (1 MiB). |
+| `default_policy` | string | `"allow"` | Default approval level: `"allow"`, `"ask"`, or `"deny"`. |
+
+<Tabs>
+  <Tab title="Default (zero config)">
+    ```yaml
+    modules:
+      tool.file_read: {}
+    ```
+  </Tab>
+  <Tab title="Custom">
+    ```yaml
+    modules:
+      tool.file_read:
+        max_file_size: 5242880
+        default_policy: "allow"
+    ```
+  </Tab>
+</Tabs>
+
+## tool.file_write
+
+Configurable replacement for the built-in `write_file` tool. Controls content size limits, automatic directory creation, and approval policy.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_file_size` | int | `1048576` | Maximum content size in bytes to write (1 MiB). |
+| `create_dirs` | bool | `true` | Automatically create parent directories on write. |
+| `default_policy` | string | `"allow"` | Default approval level: `"allow"`, `"ask"`, or `"deny"`. |
+
+<Tabs>
+  <Tab title="Default (zero config)">
+    ```yaml
+    modules:
+      tool.file_write: {}
+    ```
+  </Tab>
+  <Tab title="Custom">
+    ```yaml
+    modules:
+      tool.file_write:
+        max_file_size: 2097152
+        create_dirs: false
+        default_policy: "ask"
+    ```
+  </Tab>
+</Tabs>

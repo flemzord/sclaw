@@ -167,10 +167,36 @@ func wireRouter(
 		historyStore, _ = svc.(memory.HistoryStore)
 	}
 
-	// Build the global tool registry with built-in tools.
+	// Build the global tool registry.
+	// First, discover tools from ToolProvider modules (configurable replacements).
+	// Then, register built-in tools only for names not already covered by a module.
 	globalTools := tool.NewRegistry()
-	if err := builtin.RegisterAll(globalTools); err != nil {
-		return fmt.Errorf("registering built-in tools: %w", err)
+
+	coveredTools := make(map[string]bool)
+	for _, id := range ids {
+		mod, ok := app.Module(id)
+		if !ok {
+			continue
+		}
+		if tp, ok := mod.(tool.Provider); ok {
+			for _, t := range tp.Tools() {
+				if err := globalTools.Register(t); err != nil {
+					return fmt.Errorf("registering tool from module %s: %w", id, err)
+				}
+				coveredTools[t.Name()] = true
+				logger.Info("router: registered tool from module", "tool", t.Name(), "module", id)
+			}
+		}
+	}
+
+	// Register built-in tools that are NOT covered by any module.
+	for _, t := range builtin.All() {
+		if coveredTools[t.Name()] {
+			continue
+		}
+		if err := globalTools.Register(t); err != nil {
+			return fmt.Errorf("registering built-in tool %s: %w", t.Name(), err)
+		}
 	}
 
 	// Register config tools (read/modify sclaw.yaml at runtime).

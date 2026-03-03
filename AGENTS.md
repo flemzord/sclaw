@@ -34,10 +34,15 @@ internal/             → Private packages (not importable)
   internal/tool/      → Tool registry + approval system
   internal/tool/configtool/ → Runtime config tools (get, validate, patch, apply)
   internal/tool/crontool/   → Prompt cron CRUD tools (list, get, create, update, delete)
+  internal/tool/safepath/   → Shared path validation and resolution
   internal/workspace/ → Working directory management
 pkg/                  → Public reusable packages
   pkg/app/            → Shared entry point (Run, ResolveConfigPath)
   pkg/message/        → Platform-agnostic message model
+modules/              → Configurable modules (side-effect imports)
+  modules/tool/shell/       → Configurable exec tool (tool.shell)
+  modules/tool/file_read/   → Configurable read_file tool (tool.file_read)
+  modules/tool/file_write/  → Configurable write_file tool (tool.file_write)
 skills/               → Embedded SKILL.md files (go:embed)
 docs/                 → Additional documentation
   docs/security/      → Security documentation
@@ -310,6 +315,45 @@ Each execution writes to `{data_dir}/crons/results/{name}.json` (last result onl
 - `internal/workspace/workspace.go` — `CronsDir()` method
 - `internal/multiagent/factory.go` — `ForCronJob()`, `BuildCronLoop()`
 - `pkg/app/wire.go` — wiring, `cronOutputAdapter`
+
+## Tool Modules
+
+The three core tools (`exec`, `read_file`, `write_file`) are available both as hardcoded builtins (`internal/tool/builtin/`) and as configurable modules (`modules/tool/`). The module system uses the `tool.Provider` interface to discover tools from loaded modules.
+
+### Provider Interface
+
+```go
+// internal/tool/provider.go
+type Provider interface {
+    Tools() []Tool
+}
+```
+
+Modules implementing `tool.Provider` have their tools registered during wiring. Built-in tools are only registered as fallbacks for names not already covered by a module.
+
+### Backward Compatibility
+
+| Configuration | Behavior |
+|--------------|----------|
+| No `tool.*` modules | All 3 builtins are used (legacy behavior) |
+| Some `tool.*` modules | Module tools replace their builtins; others stay |
+| All `tool.*` modules | No builtins loaded |
+
+### Key Packages
+
+- `internal/tool/provider.go` — `tool.Provider` interface
+- `internal/tool/safepath/` — Shared path validation (extracted from builtin)
+- `modules/tool/shell/` — Configurable `exec` tool
+- `modules/tool/file_read/` — Configurable `read_file` tool
+- `modules/tool/file_write/` — Configurable `write_file` tool
+- `pkg/app/wire.go` — Provider discovery + builtin fallback logic
+
+### Adding New Tool Modules
+
+1. Create `modules/tool/<name>/` with `Module` struct implementing `core.Module` + `tool.Provider`
+2. Register via `init()` with `core.RegisterModule`
+3. Add side-effect import in `cmd/sclaw/main.go`
+4. The tool name in the module must match the builtin name it replaces
 
 ## CI/CD
 

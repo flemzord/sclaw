@@ -44,6 +44,11 @@ type initResult struct {
 	Workspace    string
 	EnableMemory bool
 	CreateSoulMD bool
+
+	// Tools
+	EnableShellTool     bool
+	EnableFileReadTool  bool
+	EnableFileWriteTool bool
 }
 
 func providerPresets() []providerPreset {
@@ -114,11 +119,14 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 
 	result := &initResult{
-		TelegramMode: "polling",
-		DataDir:      app.DefaultDataDir(),
-		Workspace:    app.DefaultWorkspace(),
-		EnableMemory: true,
-		CreateSoulMD: true,
+		TelegramMode:        "polling",
+		DataDir:             app.DefaultDataDir(),
+		Workspace:           app.DefaultWorkspace(),
+		EnableMemory:        true,
+		CreateSoulMD:        true,
+		EnableShellTool:     true,
+		EnableFileReadTool:  true,
+		EnableFileWriteTool: true,
 	}
 
 	// Form 1: Channel + Preset selection.
@@ -129,8 +137,8 @@ func runInit(_ *cobra.Command, _ []string) error {
 
 	applyPreset(result)
 
-	// Form 2: Provider details (pre-filled) + Agent/Workspace.
-	form2 := huh.NewForm(buildProviderGroup(result), buildAgentGroup(result))
+	// Form 2: Provider details (pre-filled) + Agent/Workspace + Tools.
+	form2 := huh.NewForm(buildProviderGroup(result), buildAgentGroup(result), buildToolGroup(result))
 	if err := form2.Run(); err != nil {
 		return err
 	}
@@ -252,6 +260,20 @@ func buildAgentGroup(r *initResult) *huh.Group {
 	).Title("Agent & Workspace")
 }
 
+func buildToolGroup(r *initResult) *huh.Group {
+	return huh.NewGroup(
+		huh.NewConfirm().
+			Title("Enable shell execution tool (exec)?").
+			Value(&r.EnableShellTool),
+		huh.NewConfirm().
+			Title("Enable file read tool (read_file)?").
+			Value(&r.EnableFileReadTool),
+		huh.NewConfirm().
+			Title("Enable file write tool (write_file)?").
+			Value(&r.EnableFileWriteTool),
+	).Title("Tool Modules")
+}
+
 func applyPreset(r *initResult) {
 	for _, p := range providerPresets() {
 		if p.Name == r.PresetName {
@@ -337,6 +359,17 @@ func generateYAML(r *initResult) []byte {
 	// Memory.
 	if r.EnableMemory {
 		modules["memory.sqlite"] = map[string]interface{}{}
+	}
+
+	// Tool modules.
+	if r.EnableShellTool {
+		modules["tool.shell"] = map[string]interface{}{}
+	}
+	if r.EnableFileReadTool {
+		modules["tool.file_read"] = map[string]interface{}{}
+	}
+	if r.EnableFileWriteTool {
+		modules["tool.file_write"] = map[string]interface{}{}
 	}
 
 	cfg := yamlConfig{
