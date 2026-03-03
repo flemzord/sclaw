@@ -300,6 +300,11 @@ func (f *Factory) ResolveSoul(agentID string) (string, error) {
 // agent's data directory, filters excluded global skills, activates based
 // on trigger rules and available tools, then formats for the system prompt.
 func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
+	logger := f.cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	agentCfg, ok := f.cfg.Registry.AgentConfig(agentID)
 	if !ok {
 		return "", nil
@@ -318,12 +323,21 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		return "", fmt.Errorf("multiagent: loading agent skills for %q: %w", agentID, err)
 	}
 
+	logger.Debug("skills loaded from disk",
+		"agent_id", agentID,
+		"global_count", len(globalSkills),
+		"global_dir", f.cfg.GlobalSkillsDir,
+		"agent_count", len(agentSkills),
+		"agent_dir", agentSkillsDir,
+	)
+
 	// Filter excluded global skills.
 	globalSkills = workspace.ExcludeByName(globalSkills, agentCfg.ExcludeSkills)
 
 	// Merge: filtered global + per-agent.
 	allSkills := append(globalSkills, agentSkills...)
 	if len(allSkills) == 0 {
+		logger.Debug("no skills found for agent", "agent_id", agentID)
 		return "", nil
 	}
 
@@ -337,6 +351,12 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		UserMessage:    userMessage,
 		AvailableTools: toolNames,
 	})
+
+	logger.Debug("skills activation complete",
+		"agent_id", agentID,
+		"loaded", len(allSkills),
+		"active", len(active),
+	)
 
 	return workspace.FormatSkillsForPrompt(active), nil
 }

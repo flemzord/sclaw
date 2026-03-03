@@ -155,6 +155,47 @@ func TestLoadSkillsFromDir_MissingDir(t *testing.T) {
 	}
 }
 
+func TestLoadSkillsFromDir_Subdirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Skill in a subdirectory (e.g. skills/my-skill/SKILL.md).
+	subDir := filepath.Join(dir, "my-skill")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillContent := "---\nname: my-skill\ntrigger: always\n---\nSkill body.\n"
+	if err := os.WriteFile(filepath.Join(subDir, "SKILL.md"), []byte(skillContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Root-level skill alongside the subdirectory.
+	if err := os.WriteFile(filepath.Join(dir, "root-skill.md"), []byte(validSkillContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, err := LoadSkillsFromDir(dir)
+	if err != nil {
+		t.Fatalf("LoadSkillsFromDir() error: %v", err)
+	}
+
+	if len(skills) != 2 {
+		t.Fatalf("got %d skills, want 2 (root + subdirectory)", len(skills))
+	}
+
+	names := map[string]bool{}
+	for _, s := range skills {
+		names[s.Meta.Name] = true
+	}
+	if !names["code-review"] {
+		t.Error("missing root-level skill 'code-review'")
+	}
+	if !names["my-skill"] {
+		t.Error("missing subdirectory skill 'my-skill'")
+	}
+}
+
 func TestExcludeByName_RemovesMatchingSkills(t *testing.T) {
 	t.Parallel()
 

@@ -58,11 +58,8 @@ func (a *SkillActivator) Activate(req ActivateRequest) []Skill {
 }
 
 // hasRequiredTools checks that all tools required by the skill are available.
-// Skills with no required tools are excluded silently.
+// Skills with no tools_required are considered tool-independent and always pass.
 func hasRequiredTools(skill Skill, available map[string]bool) bool {
-	if len(skill.Meta.ToolsRequired) == 0 {
-		return false
-	}
 	for _, tool := range skill.Meta.ToolsRequired {
 		if !available[tool] {
 			return false

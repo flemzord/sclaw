@@ -149,7 +149,7 @@ func TestActivator_ManualNotActive(t *testing.T) {
 func TestActivator_NoToolsRequired(t *testing.T) {
 	t.Parallel()
 
-	// Skills with empty ToolsRequired are excluded silently.
+	// Skills with empty ToolsRequired are tool-independent and always pass.
 	skill := Skill{
 		Meta: SkillMeta{
 			Name:    "empty-tools",
@@ -164,8 +164,8 @@ func TestActivator_NoToolsRequired(t *testing.T) {
 		AvailableTools: []string{"read_file"},
 	})
 
-	if len(result) != 0 {
-		t.Errorf("got %d skills, want 0 (no tools_required)", len(result))
+	if len(result) != 1 {
+		t.Errorf("got %d skills, want 1 (no tools_required = tool-independent)", len(result))
 	}
 }
 

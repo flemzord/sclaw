@@ -67,11 +67,11 @@ When reviewing code:
 | `description` | string | no | — | Human-readable description (shown in prompt header). |
 | `trigger` | string | no | `manual` | Activation mode: `always`, `auto`, or `manual`. |
 | `keywords` | list | no | — | Keywords that activate `auto` skills (case-insensitive). |
-| `tools_required` | list | yes | — | Tools the agent must have for this skill to activate. |
+| `tools_required` | list | no | — | Tools the agent must have for this skill to activate. If omitted, the skill is tool-independent and always passes the tool check. |
 
-<Warning>
-Skills with no `tools_required` are silently skipped. This prevents skills from activating when the agent lacks the tools to act on them.
-</Warning>
+<Tip>
+When `tools_required` is specified, all listed tools must be available in the agent's tool registry for the skill to activate. When omitted, the skill is considered tool-independent.
+</Tip>
 
 ## Trigger Modes
 
@@ -97,9 +97,10 @@ Global skills are shared across **all agents**:
 
 ```
 {data_dir}/skills/*.md
+{data_dir}/skills/{skill-name}/*.md
 ```
 
-Any `.md` file in this directory is parsed as a skill. Invalid files (missing frontmatter, missing name) are silently skipped.
+Skill files can be placed directly in the `skills/` directory or inside a named subdirectory (e.g. `skills/code-review/SKILL.md`). The subdirectory format is useful for bundling a skill with related assets. Invalid files (missing frontmatter, missing name) are silently skipped.
 
 ### Per-Agent Skills
 

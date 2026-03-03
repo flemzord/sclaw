@@ -78,7 +78,9 @@ func ParseSkill(content, path string) (Skill, error) {
 	}, nil
 }
 
-// LoadSkillsFromDir loads all .md files from the given directory.
+// LoadSkillsFromDir loads skill files from the given directory.
+// It reads .md files at the root and also scans one level of subdirectories
+// for .md files (e.g. skills/my-skill/SKILL.md).
 // Returns nil without error if the directory does not exist.
 // Unparseable files are skipped silently.
 func LoadSkillsFromDir(dir string) ([]Skill, error) {
@@ -88,6 +90,43 @@ func LoadSkillsFromDir(dir string) ([]Skill, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+
+	skills := make([]Skill, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			// Scan one level of subdirectories for .md files.
+			subSkills := loadSkillsFromSubdir(filepath.Join(dir, entry.Name()))
+			skills = append(skills, subSkills...)
+			continue
+		}
+
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		skill, err := ParseSkill(string(data), path)
+		if err != nil {
+			continue
+		}
+
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+// loadSkillsFromSubdir loads .md files from a single subdirectory (non-recursive).
+func loadSkillsFromSubdir(dir string) []Skill {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
 	}
 
 	skills := make([]Skill, 0, len(entries))
@@ -109,8 +148,7 @@ func LoadSkillsFromDir(dir string) ([]Skill, error) {
 
 		skills = append(skills, skill)
 	}
-
-	return skills, nil
+	return skills
 }
 
 // ExcludeByName filters out skills whose Meta.Name is in the exclusion set.
