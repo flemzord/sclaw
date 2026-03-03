@@ -28,7 +28,13 @@ func FormatSkillsForPrompt(skills []Skill) string {
 			b.WriteString(skill.Meta.Description)
 			b.WriteString("</description>")
 		}
-		if skill.Path != "" {
+		if strings.HasPrefix(skill.Path, BuiltinPathPrefix) {
+			// Builtin skills: inline the full body since there is no
+			// filesystem path the agent can read_file from.
+			b.WriteString("\n    <content>")
+			b.WriteString(skill.Body)
+			b.WriteString("</content>")
+		} else if skill.Path != "" {
 			b.WriteString("\n    <location>")
 			b.WriteString(skill.Path)
 			b.WriteString("</location>")
@@ -39,7 +45,8 @@ func FormatSkillsForPrompt(skills []Skill) string {
 	b.WriteString("\n</available_skills>\n\n")
 	b.WriteString("The skill catalog above lists all your available skills. ")
 	b.WriteString("You can answer questions about which skills you have by reading this catalog directly. ")
-	b.WriteString("To apply a skill, load its full content using the read_file tool with the path from <location>.")
+	b.WriteString("For skills with a <content> tag, the full skill is already available inline. ")
+	b.WriteString("For skills with a <location> tag, load the full content using the read_file tool with the listed path.")
 
 	return b.String()
 }

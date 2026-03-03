@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
@@ -15,6 +16,7 @@ import (
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/internal/tool/tooltest"
+	"github.com/flemzord/sclaw/internal/workspace"
 	"github.com/flemzord/sclaw/pkg/message"
 )
 
@@ -850,5 +852,166 @@ func TestFactory_ResolveSkills_EmptyDirs(t *testing.T) {
 	}
 	if result != "" {
 		t.Errorf("expected empty result for empty dirs, got %q", result)
+	}
+}
+
+func TestFactory_ResolveSkills_BuiltinSkills(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+	if err := os.MkdirAll(agentDataDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	builtinFS := fstest.MapFS{
+		"builtin-skill/SKILL.md": &fstest.MapFile{
+			Data: []byte("---\nname: builtin-skill\ntrigger: always\ntools_required: [search]\n---\nBuiltin body.\n"),
+		},
+	}
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: agentDataDir,
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		BuiltinSkillsFS: builtinFS,
+		GlobalSkillsDir: filepath.Join(tmpDir, "skills"), // empty
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if !strings.Contains(result, "<name>builtin-skill</name>") {
+		t.Errorf("result missing builtin-skill:\n%s", result)
+	}
+	// Builtin skills should have inline content, not location.
+	if !strings.Contains(result, "<content>") {
+		t.Errorf("builtin skill should have inline <content>:\n%s", result)
+	}
+}
+
+func TestFactory_ResolveSkills_GlobalOverridesBuiltin(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	globalDir := filepath.Join(tmpDir, "skills")
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+	if err := os.MkdirAll(agentDataDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Builtin has "weather" skill.
+	builtinFS := fstest.MapFS{
+		"weather.md": &fstest.MapFile{
+			Data: []byte("---\nname: weather\ntrigger: always\ntools_required: [search]\n---\nBuiltin weather.\n"),
+		},
+		"coding.md": &fstest.MapFile{
+			Data: []byte("---\nname: coding\ntrigger: always\ntools_required: [search]\n---\nBuiltin coding.\n"),
+		},
+	}
+
+	// Global filesystem also has "weather" — should override builtin.
+	writeSkillFile(t, globalDir, "weather")
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: agentDataDir,
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		BuiltinSkillsFS: builtinFS,
+		GlobalSkillsDir: globalDir,
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+
+	// Both skills should be present.
+	if !strings.Contains(result, "<name>weather</name>") {
+		t.Errorf("result missing weather:\n%s", result)
+	}
+	if !strings.Contains(result, "<name>coding</name>") {
+		t.Errorf("result missing coding:\n%s", result)
+	}
+
+	// "weather" should have a <location> (from filesystem, not builtin).
+	if strings.Contains(result, workspace.BuiltinPathPrefix+"weather.md") {
+		t.Errorf("weather should be overridden by global, not builtin:\n%s", result)
+	}
+	if !strings.Contains(result, "<location>") {
+		t.Errorf("overridden weather should have a filesystem <location>:\n%s", result)
+	}
+}
+
+func TestFactory_ResolveSkills_ExcludeAppliesToBuiltin(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agentDataDir := filepath.Join(tmpDir, "agents", "bot")
+	if err := os.MkdirAll(agentDataDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	builtinFS := fstest.MapFS{
+		"keep.md": &fstest.MapFile{
+			Data: []byte("---\nname: keep\ntrigger: always\ntools_required: [search]\n---\nKeep body.\n"),
+		},
+		"drop.md": &fstest.MapFile{
+			Data: []byte("---\nname: drop\ntrigger: always\ntools_required: [search]\n---\nDrop body.\n"),
+		},
+	}
+
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir:       agentDataDir,
+			ExcludeSkills: []string{"drop"},
+			Routing:       RoutingConfig{Default: true},
+		},
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry:        reg,
+		GlobalTools:     newGlobalTools(t, "search"),
+		Logger:          slog.Default(),
+		BuiltinSkillsFS: builtinFS,
+		GlobalSkillsDir: filepath.Join(tmpDir, "skills"),
+	})
+
+	result, err := factory.ResolveSkills("bot", "hello")
+	if err != nil {
+		t.Fatalf("ResolveSkills: %v", err)
+	}
+	if !strings.Contains(result, "<name>keep</name>") {
+		t.Errorf("result missing keep:\n%s", result)
+	}
+	if strings.Contains(result, "<name>drop</name>") {
+		t.Errorf("result should not contain excluded builtin skill 'drop':\n%s", result)
 	}
 }

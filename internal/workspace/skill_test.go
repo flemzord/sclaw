@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
 const validSkillContent = `---
@@ -241,5 +242,150 @@ func TestExcludeByName_NoMatches(t *testing.T) {
 	result := ExcludeByName(skills, []string{"nonexistent"})
 	if len(result) != 2 {
 		t.Errorf("got %d skills, want 2 (no matches should keep all)", len(result))
+	}
+}
+
+func TestLoadSkillsFromFS_ValidSkill(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"review.md": &fstest.MapFile{Data: []byte(validSkillContent)},
+	}
+
+	skills, err := LoadSkillsFromFS(fsys, BuiltinPathPrefix)
+	if err != nil {
+		t.Fatalf("LoadSkillsFromFS() error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("got %d skills, want 1", len(skills))
+	}
+	if skills[0].Meta.Name != "code-review" {
+		t.Errorf("Name = %q, want %q", skills[0].Meta.Name, "code-review")
+	}
+	if skills[0].Path != BuiltinPathPrefix+"review.md" {
+		t.Errorf("Path = %q, want %q", skills[0].Path, BuiltinPathPrefix+"review.md")
+	}
+}
+
+func TestLoadSkillsFromFS_Subdirectory(t *testing.T) {
+	t.Parallel()
+
+	subSkill := "---\nname: sub-skill\ntrigger: always\n---\nSub body.\n"
+	fsys := fstest.MapFS{
+		"root.md":           &fstest.MapFile{Data: []byte(validSkillContent)},
+		"my-skill/SKILL.md": &fstest.MapFile{Data: []byte(subSkill)},
+	}
+
+	skills, err := LoadSkillsFromFS(fsys, BuiltinPathPrefix)
+	if err != nil {
+		t.Fatalf("LoadSkillsFromFS() error: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("got %d skills, want 2", len(skills))
+	}
+
+	names := map[string]bool{}
+	for _, s := range skills {
+		names[s.Meta.Name] = true
+	}
+	if !names["code-review"] {
+		t.Error("missing root-level skill 'code-review'")
+	}
+	if !names["sub-skill"] {
+		t.Error("missing subdirectory skill 'sub-skill'")
+	}
+}
+
+func TestLoadSkillsFromFS_SkipsGoFiles(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"embed.go":  &fstest.MapFile{Data: []byte("package skills")},
+		"review.md": &fstest.MapFile{Data: []byte(validSkillContent)},
+	}
+
+	skills, err := LoadSkillsFromFS(fsys, BuiltinPathPrefix)
+	if err != nil {
+		t.Fatalf("LoadSkillsFromFS() error: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("got %d skills, want 1 (should skip .go files)", len(skills))
+	}
+	if skills[0].Meta.Name != "code-review" {
+		t.Errorf("Name = %q, want %q", skills[0].Meta.Name, "code-review")
+	}
+}
+
+func TestLoadSkillsFromFS_NilFS(t *testing.T) {
+	t.Parallel()
+
+	skills, err := LoadSkillsFromFS(nil, BuiltinPathPrefix)
+	if err != nil {
+		t.Fatalf("LoadSkillsFromFS(nil) error: %v", err)
+	}
+	if skills != nil {
+		t.Errorf("got %v, want nil for nil FS", skills)
+	}
+}
+
+func TestMergeSkills_OverrideByName(t *testing.T) {
+	t.Parallel()
+
+	builtin := []Skill{
+		{Meta: SkillMeta{Name: "weather"}, Body: "builtin weather", Path: BuiltinPathPrefix + "weather.md"},
+		{Meta: SkillMeta{Name: "coding"}, Body: "builtin coding", Path: BuiltinPathPrefix + "coding.md"},
+	}
+	global := []Skill{
+		{Meta: SkillMeta{Name: "weather"}, Body: "custom weather", Path: "/data/skills/weather.md"},
+	}
+
+	result := MergeSkills(builtin, global)
+	if len(result) != 2 {
+		t.Fatalf("got %d skills, want 2", len(result))
+	}
+
+	// "weather" should be overridden by global.
+	if result[0].Body != "custom weather" {
+		t.Errorf("weather Body = %q, want %q (global should override builtin)", result[0].Body, "custom weather")
+	}
+	if result[0].Path != "/data/skills/weather.md" {
+		t.Errorf("weather Path = %q, want global path", result[0].Path)
+	}
+
+	// "coding" should remain from builtin.
+	if result[1].Body != "builtin coding" {
+		t.Errorf("coding Body = %q, want %q", result[1].Body, "builtin coding")
+	}
+}
+
+func TestMergeSkills_PreservesOrder(t *testing.T) {
+	t.Parallel()
+
+	layer1 := []Skill{
+		{Meta: SkillMeta{Name: "alpha"}},
+		{Meta: SkillMeta{Name: "beta"}},
+	}
+	layer2 := []Skill{
+		{Meta: SkillMeta{Name: "gamma"}},
+	}
+
+	result := MergeSkills(layer1, layer2)
+	if len(result) != 3 {
+		t.Fatalf("got %d skills, want 3", len(result))
+	}
+	want := []string{"alpha", "beta", "gamma"}
+	for i, name := range want {
+		if result[i].Meta.Name != name {
+			t.Errorf("result[%d].Name = %q, want %q", i, result[i].Meta.Name, name)
+		}
+	}
+}
+
+func TestMergeSkills_EmptyLayers(t *testing.T) {
+	t.Parallel()
+
+	result := MergeSkills(nil, nil)
+	if len(result) != 0 {
+		t.Errorf("got %d skills, want 0 for nil layers", len(result))
 	}
 }

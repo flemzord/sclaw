@@ -165,6 +165,62 @@ func TestPruneSkillsToFit_AlwaysNeverPruned(t *testing.T) {
 	}
 }
 
+func TestFormatSkillsForPrompt_BuiltinInline(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{
+			Meta: SkillMeta{Name: "weather", Description: "Get weather info"},
+			Body: "Use the weather API to get forecasts.",
+			Path: BuiltinPathPrefix + "weather/SKILL.md",
+		},
+	}
+
+	result := FormatSkillsForPrompt(skills)
+
+	if !strings.Contains(result, "<name>weather</name>") {
+		t.Error("missing skill name")
+	}
+	if !strings.Contains(result, "<content>Use the weather API to get forecasts.</content>") {
+		t.Error("missing inline <content> for builtin skill")
+	}
+	if strings.Contains(result, "<location>"+BuiltinPathPrefix) {
+		t.Error("builtin skill should not have <location> tag with builtin path")
+	}
+	if !strings.Contains(result, "skills with a <content> tag") {
+		t.Error("missing updated instruction text for inline skills")
+	}
+}
+
+func TestFormatSkillsForPrompt_MixedBuiltinAndFilesystem(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{
+			Meta: SkillMeta{Name: "builtin-skill"},
+			Body: "Builtin body.",
+			Path: BuiltinPathPrefix + "builtin.md",
+		},
+		{
+			Meta: SkillMeta{Name: "fs-skill"},
+			Body: "FS body.",
+			Path: "/data/skills/fs-skill.md",
+		},
+	}
+
+	result := FormatSkillsForPrompt(skills)
+
+	if !strings.Contains(result, "<content>Builtin body.</content>") {
+		t.Error("builtin skill should have inline <content>")
+	}
+	if !strings.Contains(result, "<location>/data/skills/fs-skill.md</location>") {
+		t.Error("filesystem skill should have <location>")
+	}
+	if strings.Contains(result, "<content>FS body.</content>") {
+		t.Error("filesystem skill should NOT have inline <content>")
+	}
+}
+
 func TestPruneSkillsToFit_ZeroBudgetNoAlways(t *testing.T) {
 	t.Parallel()
 

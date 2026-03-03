@@ -18,6 +18,7 @@ import (
 	"github.com/flemzord/sclaw/internal/subagent"
 	"github.com/flemzord/sclaw/internal/tool"
 	"github.com/flemzord/sclaw/internal/tool/builtin"
+	"github.com/flemzord/sclaw/skills"
 )
 
 // factoryCloser is implemented by multiagent.Factory to close SQLite databases.
@@ -159,6 +160,7 @@ func wireRouter(
 		URLFilter:       urlFilter,
 		SanitizedEnv:    sanitizedEnv,
 		HistoryStore:    historyStore,
+		BuiltinSkillsFS: skills.BuiltinFS,
 		GlobalSkillsDir: globalSkillsDir,
 	})
 

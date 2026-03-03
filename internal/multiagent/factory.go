@@ -3,6 +3,7 @@ package multiagent
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path/filepath"
 	"sync"
@@ -41,6 +42,12 @@ type FactoryConfig struct {
 	// SanitizedEnv, if non-nil, provides a pre-sanitized set of environment
 	// variables passed to tools that spawn subprocesses.
 	SanitizedEnv []string
+
+	// BuiltinSkillsFS, if non-nil, provides an embedded filesystem of
+	// skills compiled into the binary. These skills are available by
+	// default but can be overridden by global or per-agent filesystem skills
+	// with the same name.
+	BuiltinSkillsFS fs.FS
 
 	// GlobalSkillsDir is the path to the global skills directory.
 	// Skills in this directory are available to all agents by default.
@@ -310,11 +317,23 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		return "", nil
 	}
 
-	// Load global skills.
+	// Load builtin skills from embedded FS.
+	builtinSkills, err := workspace.LoadSkillsFromFS(f.cfg.BuiltinSkillsFS, workspace.BuiltinPathPrefix)
+	if err != nil {
+		return "", fmt.Errorf("multiagent: loading builtin skills: %w", err)
+	}
+
+	// Load global filesystem skills.
 	globalSkills, err := workspace.LoadSkillsFromDir(f.cfg.GlobalSkillsDir)
 	if err != nil {
 		return "", fmt.Errorf("multiagent: loading global skills: %w", err)
 	}
+
+	// Merge builtin + global (global overrides builtin by name).
+	merged := workspace.MergeSkills(builtinSkills, globalSkills)
+
+	// Filter excluded skills from the merged set.
+	merged = workspace.ExcludeByName(merged, agentCfg.ExcludeSkills)
 
 	// Load per-agent skills.
 	agentSkillsDir := filepath.Join(agentCfg.DataDir, "skills")
@@ -323,19 +342,18 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		return "", fmt.Errorf("multiagent: loading agent skills for %q: %w", agentID, err)
 	}
 
-	logger.Debug("skills loaded from disk",
+	logger.Debug("skills loaded",
 		"agent_id", agentID,
+		"builtin_count", len(builtinSkills),
 		"global_count", len(globalSkills),
 		"global_dir", f.cfg.GlobalSkillsDir,
+		"merged_count", len(merged),
 		"agent_count", len(agentSkills),
 		"agent_dir", agentSkillsDir,
 	)
 
-	// Filter excluded global skills.
-	globalSkills = workspace.ExcludeByName(globalSkills, agentCfg.ExcludeSkills)
-
-	// Merge: filtered global + per-agent.
-	allSkills := append(globalSkills, agentSkills...)
+	// Final merge: merged (builtin+global) + per-agent.
+	allSkills := append(merged, agentSkills...)
 	if len(allSkills) == 0 {
 		logger.Debug("no skills found for agent", "agent_id", agentID)
 		return "", nil

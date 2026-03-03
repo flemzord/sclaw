@@ -3,12 +3,18 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// BuiltinPathPrefix is the synthetic path prefix used for skills loaded
+// from an embedded filesystem. Skills with this prefix have their body
+// inlined in the prompt instead of being loaded via read_file.
+const BuiltinPathPrefix = "builtin://"
 
 // TriggerMode controls when a skill is activated.
 type TriggerMode string
@@ -164,6 +170,100 @@ func ExcludeByName(skills []Skill, names []string) []Skill {
 			result = append(result, skills[i])
 		}
 	}
+	return result
+}
+
+// LoadSkillsFromFS loads skill files from an fs.FS (typically an embed.FS).
+// It mirrors LoadSkillsFromDir but reads from the virtual filesystem.
+// pathPrefix is prepended to each skill's Path for diagnostics (e.g. "builtin://").
+// Non-.md files and unparseable files are silently skipped.
+// Returns nil without error if fsys is nil.
+func LoadSkillsFromFS(fsys fs.FS, pathPrefix string) ([]Skill, error) {
+	if fsys == nil {
+		return nil, nil
+	}
+
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return nil, fmt.Errorf("skill: reading embedded FS root: %w", err)
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		if entry.IsDir() {
+			sub := loadSkillsFromSubFS(fsys, entry.Name(), pathPrefix)
+			skills = append(skills, sub...)
+			continue
+		}
+
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		data, err := fs.ReadFile(fsys, entry.Name())
+		if err != nil {
+			continue
+		}
+
+		skill, err := ParseSkill(string(data), pathPrefix+entry.Name())
+		if err != nil {
+			continue
+		}
+
+		skills = append(skills, skill)
+	}
+
+	return skills, nil
+}
+
+// loadSkillsFromSubFS loads .md files from a subdirectory within an fs.FS.
+func loadSkillsFromSubFS(fsys fs.FS, dir, pathPrefix string) []Skill {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return nil
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := dir + "/" + entry.Name()
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			continue
+		}
+
+		skill, err := ParseSkill(string(data), pathPrefix+path)
+		if err != nil {
+			continue
+		}
+
+		skills = append(skills, skill)
+	}
+	return skills
+}
+
+// MergeSkills merges multiple skill slices. Later layers override earlier
+// ones by skill name (Meta.Name). The order within each layer is preserved;
+// overridden skills keep the position of the first occurrence.
+func MergeSkills(layers ...[]Skill) []Skill {
+	seen := make(map[string]int) // name → index in result
+	var result []Skill
+
+	for _, layer := range layers {
+		for _, skill := range layer {
+			if idx, ok := seen[skill.Meta.Name]; ok {
+				// Override: replace in-place to keep position.
+				result[idx] = skill
+			} else {
+				seen[skill.Meta.Name] = len(result)
+				result = append(result, skill)
+			}
+		}
+	}
+
 	return result
 }
 
