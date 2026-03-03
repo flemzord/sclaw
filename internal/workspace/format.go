@@ -6,8 +6,9 @@ import (
 	ctxengine "github.com/flemzord/sclaw/internal/context"
 )
 
-// FormatSkillsForPrompt formats active skills into a markdown section
-// suitable for inclusion in the system prompt.
+// FormatSkillsForPrompt formats active skills into a compact XML catalog
+// suitable for inclusion in the system prompt. The agent can load full
+// skill content on demand using read_file with the listed path.
 // Returns an empty string if no skills are provided.
 func FormatSkillsForPrompt(skills []Skill) string {
 	if len(skills) == 0 {
@@ -15,20 +16,28 @@ func FormatSkillsForPrompt(skills []Skill) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("## Active Skills")
+	b.WriteString("<available_skills>")
 
 	for _, skill := range skills {
-		b.WriteString("\n\n### ")
+		b.WriteString("\n  <skill>")
+		b.WriteString("\n    <name>")
 		b.WriteString(skill.Meta.Name)
+		b.WriteString("</name>")
 		if skill.Meta.Description != "" {
-			b.WriteString(" — ")
+			b.WriteString("\n    <description>")
 			b.WriteString(skill.Meta.Description)
+			b.WriteString("</description>")
 		}
-		if skill.Body != "" {
-			b.WriteString("\n\n")
-			b.WriteString(skill.Body)
+		if skill.Path != "" {
+			b.WriteString("\n    <location>")
+			b.WriteString(skill.Path)
+			b.WriteString("</location>")
 		}
+		b.WriteString("\n  </skill>")
 	}
+
+	b.WriteString("\n</available_skills>\n\n")
+	b.WriteString("When you need to use a skill, load its full content using the read_file tool with the path from <location>.")
 
 	return b.String()
 }

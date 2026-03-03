@@ -730,10 +730,10 @@ func TestFactory_ResolveSkills_MergesGlobalAndPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSkills: %v", err)
 	}
-	if !strings.Contains(result, "global-skill") {
+	if !strings.Contains(result, "<name>global-skill</name>") {
 		t.Errorf("result missing global-skill:\n%s", result)
 	}
-	if !strings.Contains(result, "agent-skill") {
+	if !strings.Contains(result, "<name>agent-skill</name>") {
 		t.Errorf("result missing agent-skill:\n%s", result)
 	}
 }
@@ -771,10 +771,10 @@ func TestFactory_ResolveSkills_ExcludeSkillsFiltersGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSkills: %v", err)
 	}
-	if !strings.Contains(result, "keep-me") {
+	if !strings.Contains(result, "<name>keep-me</name>") {
 		t.Errorf("result missing keep-me:\n%s", result)
 	}
-	if strings.Contains(result, "drop-me") {
+	if strings.Contains(result, "<name>drop-me</name>") {
 		t.Errorf("result should not contain drop-me:\n%s", result)
 	}
 }
@@ -812,7 +812,7 @@ func TestFactory_ResolveSkills_PerAgentNotAffectedByExclude(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSkills: %v", err)
 	}
-	if !strings.Contains(result, "my-skill") {
+	if !strings.Contains(result, "<name>my-skill</name>") {
 		t.Errorf("per-agent skill should not be affected by exclude_skills:\n%s", result)
 	}
 }

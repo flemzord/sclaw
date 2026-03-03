@@ -133,3 +133,54 @@ func TestReadFileTool_Interface(t *testing.T) {
 		t.Error("Scopes() should return at least one scope")
 	}
 }
+
+func TestReadFile_DataDirFallback(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	dataDir := t.TempDir()
+	rt := &readFileTool{}
+
+	// Create a file only in dataDir, not in workspace.
+	content := "skill content from data dir"
+	skillDir := filepath.Join(dataDir, "skills")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "review.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := tool.ExecutionEnv{Workspace: workspace, DataDir: dataDir}
+	args, _ := json.Marshal(readFileArgs{Path: filepath.Join(dataDir, "skills", "review.md")})
+
+	out, err := rt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.IsError {
+		t.Fatalf("unexpected tool error: %s", out.Content)
+	}
+	if out.Content != content {
+		t.Errorf("content = %q, want %q", out.Content, content)
+	}
+}
+
+func TestReadFile_DataDirEmpty(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	rt := &readFileTool{}
+
+	// Path outside workspace with no DataDir configured — should fail.
+	env := tool.ExecutionEnv{Workspace: workspace}
+	args, _ := json.Marshal(readFileArgs{Path: "/some/other/path/file.txt"})
+
+	out, err := rt.Execute(context.Background(), args, env)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.IsError {
+		t.Error("expected tool error when DataDir is empty and path is outside workspace")
+	}
+}

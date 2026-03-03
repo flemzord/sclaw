@@ -1226,7 +1226,7 @@ func TestPipeline_SkillResolver_InjectsSkills(t *testing.T) {
 	sender := &testResponseSender{}
 	store := NewInMemorySessionStore()
 
-	skillResolver := &testSkillResolver{section: "## Active Skills\n\n### my-skill\n\nDo stuff."}
+	skillResolver := &testSkillResolver{section: "<available_skills>\n  <skill>\n    <name>my-skill</name>\n  </skill>\n</available_skills>"}
 
 	agentFactory := &agentIDSettingFactory{
 		inner:   &testAgentFactory{loop: loop},
@@ -1254,10 +1254,10 @@ func TestPipeline_SkillResolver_InjectsSkills(t *testing.T) {
 		t.Fatal("expected at least 1 message sent to provider")
 	}
 	systemPrompt := capturedMessages[0].Content
-	if !strings.Contains(systemPrompt, "## Active Skills") {
-		t.Errorf("system prompt missing skill section:\n%s", systemPrompt)
+	if !strings.Contains(systemPrompt, "<available_skills>") {
+		t.Errorf("system prompt missing skill catalog:\n%s", systemPrompt)
 	}
-	if !strings.Contains(systemPrompt, "my-skill") {
+	if !strings.Contains(systemPrompt, "<name>my-skill</name>") {
 		t.Errorf("system prompt missing my-skill:\n%s", systemPrompt)
 	}
 }

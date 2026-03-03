@@ -14,8 +14,12 @@ const maxFileSize = 1 << 20
 
 type readFileTool struct{}
 
-func (t *readFileTool) Name() string        { return "read_file" }
-func (t *readFileTool) Description() string { return "Read the contents of a file in the workspace." }
+func (t *readFileTool) Name() string { return "read_file" }
+
+func (t *readFileTool) Description() string {
+	return "Read the contents of a file in the workspace or data directory."
+}
+
 func (t *readFileTool) Scopes() []tool.Scope {
 	return []tool.Scope{tool.ScopeReadOnly}
 }
@@ -28,7 +32,7 @@ func (t *readFileTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"path": {"type": "string", "description": "File path (relative to workspace or absolute within it)."}
+			"path": {"type": "string", "description": "File path (relative to workspace, or absolute within workspace/data directory)."}
 		},
 		"required": ["path"]
 	}`)
@@ -45,6 +49,9 @@ func (t *readFileTool) Execute(_ context.Context, args json.RawMessage, env tool
 	}
 
 	resolved, err := SafePath(env.Workspace, a.Path)
+	if err != nil && env.DataDir != "" {
+		resolved, err = SafePath(env.DataDir, a.Path)
+	}
 	if err != nil {
 		return tool.Output{Content: fmt.Sprintf("path error: %v", err), IsError: true}, nil
 	}

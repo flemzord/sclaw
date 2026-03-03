@@ -8,11 +8,34 @@ Skills are reusable Markdown files that inject domain-specific instructions into
 
 ## How It Works
 
-On each inbound message, the pipeline resolves active skills for the agent and appends them to the system prompt (after the [SOUL.md](/concepts/soul) personality). Skills are activated based on their trigger mode, keyword matches, and whether the agent has the required tools.
+On each inbound message, the pipeline resolves active skills for the agent and injects a **compact XML catalog** into the system prompt (after the [SOUL.md](/concepts/soul) personality). The catalog lists each skill's name, description, and file path — but not the full body. The agent loads full skill content on demand using `read_file` with the listed path.
 
 ```
-System Prompt = SOUL.md + Active Skills
+System Prompt = SOUL.md + Skill Catalog (XML)
 ```
+
+### Compact Catalog Format
+
+Instead of injecting full skill bodies into the prompt, sclaw generates a lightweight XML listing:
+
+```xml
+<available_skills>
+  <skill>
+    <name>code-review</name>
+    <description>Reviews code for quality issues</description>
+    <location>/data/agents/coder/skills/code-review.md</location>
+  </skill>
+  <skill>
+    <name>security-policy</name>
+    <description>Enforces security best practices</description>
+    <location>/data/skills/security-policy.md</location>
+  </skill>
+</available_skills>
+
+When you need to use a skill, load its full content using the read_file tool with the path from <location>.
+```
+
+This keeps the system prompt lean while giving the agent awareness of all available skills. The `read_file` tool can access files in both the workspace and the data directory, so skill paths resolve correctly.
 
 ## Skill File Format
 

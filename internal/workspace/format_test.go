@@ -31,19 +31,29 @@ func TestFormatSkillsForPrompt_SingleSkill(t *testing.T) {
 		{
 			Meta: SkillMeta{Name: "code-review", Description: "Reviews code"},
 			Body: "Check for bugs.",
+			Path: "/data/skills/code-review.md",
 		},
 	}
 
 	result := FormatSkillsForPrompt(skills)
 
-	if !strings.Contains(result, "## Active Skills") {
-		t.Error("missing '## Active Skills' header")
+	if !strings.Contains(result, "<available_skills>") {
+		t.Error("missing <available_skills> tag")
 	}
-	if !strings.Contains(result, "### code-review — Reviews code") {
-		t.Error("missing skill header")
+	if !strings.Contains(result, "<name>code-review</name>") {
+		t.Error("missing skill name")
 	}
-	if !strings.Contains(result, "Check for bugs.") {
-		t.Error("missing skill body")
+	if !strings.Contains(result, "<description>Reviews code</description>") {
+		t.Error("missing skill description")
+	}
+	if !strings.Contains(result, "<location>/data/skills/code-review.md</location>") {
+		t.Error("missing skill location")
+	}
+	if strings.Contains(result, "Check for bugs.") {
+		t.Error("body should not be included in compact format")
+	}
+	if !strings.Contains(result, "read_file") {
+		t.Error("missing read_file instruction")
 	}
 }
 
@@ -54,20 +64,28 @@ func TestFormatSkillsForPrompt_MultipleSkills(t *testing.T) {
 		{
 			Meta: SkillMeta{Name: "review", Description: "Code review"},
 			Body: "Review body.",
+			Path: "/data/skills/review.md",
 		},
 		{
 			Meta: SkillMeta{Name: "deploy", Description: "Deployment"},
 			Body: "Deploy body.",
+			Path: "/data/skills/deploy.md",
 		},
 	}
 
 	result := FormatSkillsForPrompt(skills)
 
-	if !strings.Contains(result, "### review — Code review") {
+	if !strings.Contains(result, "<name>review</name>") {
 		t.Error("missing first skill")
 	}
-	if !strings.Contains(result, "### deploy — Deployment") {
+	if !strings.Contains(result, "<name>deploy</name>") {
 		t.Error("missing second skill")
+	}
+	if !strings.Contains(result, "<description>Code review</description>") {
+		t.Error("missing first skill description")
+	}
+	if !strings.Contains(result, "<description>Deployment</description>") {
+		t.Error("missing second skill description")
 	}
 }
 
@@ -78,16 +96,17 @@ func TestFormatSkillsForPrompt_NoDescription(t *testing.T) {
 		{
 			Meta: SkillMeta{Name: "simple"},
 			Body: "Just a body.",
+			Path: "/data/skills/simple.md",
 		},
 	}
 
 	result := FormatSkillsForPrompt(skills)
 
-	if strings.Contains(result, "—") {
-		t.Error("should not contain em-dash when description is empty")
+	if strings.Contains(result, "<description>") {
+		t.Error("should not contain <description> tag when description is empty")
 	}
-	if !strings.Contains(result, "### simple") {
-		t.Error("missing skill name header")
+	if !strings.Contains(result, "<name>simple</name>") {
+		t.Error("missing skill name")
 	}
 }
 
