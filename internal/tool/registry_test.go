@@ -25,7 +25,7 @@ func (t registryTestTool) Scopes() []Scope              { return t.scopes }
 func (t registryTestTool) DefaultPolicy() ApprovalLevel { return ApprovalAllow }
 func (t registryTestTool) Execute(context.Context, json.RawMessage, ExecutionEnv) (Output, error) {
 	if t.executeCalls != nil {
-		*t.executeCalls = *t.executeCalls + 1
+		*t.executeCalls++
 	}
 	if t.executeErr != nil {
 		return Output{}, t.executeErr

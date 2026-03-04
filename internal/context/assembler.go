@@ -2,6 +2,7 @@ package ctxengine
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/flemzord/sclaw/internal/provider"
@@ -157,7 +158,7 @@ func (a *ContextAssembler) limitMemoryFactsByTokens(facts []string, maxTokens in
 
 	var kept []string
 	for _, fact := range facts {
-		candidate := append(kept, fact)
+		candidate := slices.Concat(kept, []string{fact})
 		formatted := formatMemoryFacts(candidate)
 		if a.estimator.Estimate(formatted) > maxTokens {
 			break

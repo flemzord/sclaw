@@ -156,7 +156,7 @@ func appendPiece(current *strings.Builder, currentLen *int, chunks *[]string, pi
 	if len(piece) <= maxLen {
 		if *currentLen > 0 {
 			current.WriteByte('\n')
-			*currentLen = *currentLen + 1
+			*currentLen++
 		}
 		current.WriteString(piece)
 		*currentLen += len(piece)
@@ -188,7 +188,7 @@ func appendLine(current *strings.Builder, currentLen *int, chunks *[]string, lin
 	}
 	if *currentLen > 0 {
 		current.WriteByte('\n')
-		*currentLen = *currentLen + 1
+		*currentLen++
 	}
 	current.WriteString(line)
 	*currentLen += len(line)

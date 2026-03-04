@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -365,7 +366,7 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 	)
 
 	// Final merge: merged (builtin+global) + per-agent.
-	allSkills := append(merged, agentSkills...)
+	allSkills := slices.Concat(merged, agentSkills)
 	if len(allSkills) == 0 {
 		logger.Debug("no skills found for agent", "agent_id", agentID)
 		return "", nil

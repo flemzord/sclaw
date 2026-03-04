@@ -421,18 +421,19 @@ func TestConvertInbound_Mentions(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if tt.wantMention {
+			switch {
+			case tt.wantMention:
 				if inbound.Mentions == nil || !inbound.Mentions.IsMentioned {
 					t.Error("IsMentioned = false, want true")
 				}
-			} else if tt.wantIDs != nil {
+			case tt.wantIDs != nil:
 				if inbound.Mentions == nil {
 					t.Fatal("Mentions = nil, want non-nil")
 				}
 				if inbound.Mentions.IsMentioned {
 					t.Error("IsMentioned = true, want false")
 				}
-			} else {
+			default:
 				if inbound.Mentions != nil {
 					t.Errorf("Mentions = %+v, want nil", inbound.Mentions)
 				}

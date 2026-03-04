@@ -2,6 +2,12 @@ version: "2"
 
 linters:
   default: standard
+  settings:
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          yaml: snake
   enable:
     - copyloopvar
     - errname
@@ -11,10 +17,14 @@ linters:
     - noctx
     - prealloc
     - revive
-    - unconvert
-    - unparam
     - usestdlibvars
     - whitespace
+    - gocritic
+    - unparam
+    - unconvert
+    - unused
+    - tparallel
+    - tagliatelle
 
 formatters:
   enable:

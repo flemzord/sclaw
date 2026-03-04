@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	ctxengine "github.com/flemzord/sclaw/internal/context"
@@ -41,7 +42,7 @@ func InjectMemory(ctx context.Context, req InjectionRequest) ([]string, error) {
 	var result []string
 
 	for i := range facts {
-		candidate := append(result, facts[i].Content)
+		candidate := slices.Concat(result, []string{facts[i].Content})
 		if req.Estimator.Estimate(FormatFacts(candidate)) > req.MaxTokens {
 			break
 		}
