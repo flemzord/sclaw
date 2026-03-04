@@ -14,6 +14,13 @@ import (
 // opPattern matches op://vault/item/field and op://vault/item/section/field references.
 var opPattern = regexp.MustCompile(`op://[^\s"'\x60,\]\}]+`)
 
+// opLookPathFunc checks whether the 1Password CLI is available.
+// It is a package variable so tests can replace it.
+var opLookPathFunc = func() error {
+	_, err := exec.LookPath("op")
+	return err
+}
+
 // opRunnerFunc executes "op read" for a single reference and returns the secret value.
 // It is a package variable so tests can replace it without touching the real CLI.
 var opRunnerFunc = opCLIRunner
@@ -46,7 +53,7 @@ func resolveOnePassword(raw []byte) ([]byte, error) {
 	}
 
 	// Verify the op CLI is available.
-	if _, err := exec.LookPath("op"); err != nil {
+	if err := opLookPathFunc(); err != nil {
 		return nil, fmt.Errorf("config contains op:// references but 1Password CLI is not installed: %w", err)
 	}
 

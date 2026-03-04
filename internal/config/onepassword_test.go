@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+// stubOP replaces both opLookPathFunc and opRunnerFunc for the duration of a test.
+// It returns a cleanup function that restores the originals.
+func stubOP(t *testing.T, runner func(string) (string, error)) {
+	t.Helper()
+	origLookPath := opLookPathFunc
+	origRunner := opRunnerFunc
+	t.Cleanup(func() {
+		opLookPathFunc = origLookPath
+		opRunnerFunc = origRunner
+	})
+	opLookPathFunc = func() error { return nil }
+	opRunnerFunc = runner
+}
+
 func TestResolveOnePassword_NoRefs(t *testing.T) {
 	input := []byte("token: plain_value\nkey: another")
 	result, err := resolveOnePassword(input)
@@ -19,15 +33,12 @@ func TestResolveOnePassword_NoRefs(t *testing.T) {
 }
 
 func TestResolveOnePassword_SingleRef(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		if ref == "op://vault/item/field" {
 			return "secret123", nil
 		}
 		return "", fmt.Errorf("unexpected ref: %s", ref)
-	}
+	})
 
 	input := []byte(`token: "op://vault/item/field"`)
 	result, err := resolveOnePassword(input)
@@ -41,20 +52,17 @@ func TestResolveOnePassword_SingleRef(t *testing.T) {
 }
 
 func TestResolveOnePassword_MultipleRefs(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
 	secrets := map[string]string{
 		"op://vault/item/token":   "tok_abc",
 		"op://vault/item/api-key": "key_xyz",
 	}
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		v, ok := secrets[ref]
 		if !ok {
 			return "", fmt.Errorf("unexpected ref: %s", ref)
 		}
 		return v, nil
-	}
+	})
 
 	input := []byte("token: op://vault/item/token\napi_key: op://vault/item/api-key")
 	result, err := resolveOnePassword(input)
@@ -71,14 +79,11 @@ func TestResolveOnePassword_MultipleRefs(t *testing.T) {
 }
 
 func TestResolveOnePassword_Deduplication(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
 	var callCount atomic.Int32
-	opRunnerFunc = func(_ string) (string, error) {
+	stubOP(t, func(_ string) (string, error) {
 		callCount.Add(1)
 		return "resolved", nil
-	}
+	})
 
 	input := []byte("a: op://vault/item/field\nb: op://vault/item/field\nc: op://vault/item/field")
 	result, err := resolveOnePassword(input)
@@ -94,12 +99,9 @@ func TestResolveOnePassword_Deduplication(t *testing.T) {
 }
 
 func TestResolveOnePassword_ErrorAccumulation(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		return "", fmt.Errorf("failed: %s", ref)
-	}
+	})
 
 	input := []byte("a: op://vault/item/one\nb: op://vault/item/two")
 	_, err := resolveOnePassword(input)
@@ -115,13 +117,10 @@ func TestResolveOnePassword_ErrorAccumulation(t *testing.T) {
 }
 
 func TestResolveOnePassword_TwoSegmentError(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		t.Fatalf("op runner should not be called for invalid ref, got: %s", ref)
 		return "", nil
-	}
+	})
 
 	input := []byte(`token: "op://vault/item"`)
 	_, err := resolveOnePassword(input)
@@ -137,15 +136,12 @@ func TestResolveOnePassword_TwoSegmentError(t *testing.T) {
 }
 
 func TestResolveOnePassword_FourSegmentPath(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		if ref == "op://vault/item/section/field" {
 			return "deep_secret", nil
 		}
 		return "", fmt.Errorf("unexpected ref: %s", ref)
-	}
+	})
 
 	input := []byte(`key: "op://vault/item/section/field"`)
 	result, err := resolveOnePassword(input)

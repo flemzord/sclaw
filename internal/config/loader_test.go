@@ -150,15 +150,12 @@ func TestExpandEnv_MultipleErrors(t *testing.T) {
 }
 
 func TestLoad_WithOnePasswordExpansion(t *testing.T) {
-	orig := opRunnerFunc
-	defer func() { opRunnerFunc = orig }()
-
-	opRunnerFunc = func(ref string) (string, error) {
+	stubOP(t, func(ref string) (string, error) {
 		if ref == "op://Private/sclaw/test-key" {
 			return "op_resolved_value", nil
 		}
 		return "", fmt.Errorf("unexpected ref: %s", ref)
-	}
+	})
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
