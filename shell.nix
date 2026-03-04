@@ -2,7 +2,7 @@
 
 let
   lint = pkgs.writeShellScriptBin "lint" ''
-    golangci-lint run
+    golangci-lint run --fix
   '';
 
   run-tests = pkgs.writeShellScriptBin "run-tests" ''

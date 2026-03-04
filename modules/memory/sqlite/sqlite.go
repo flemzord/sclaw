@@ -14,7 +14,6 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/memory"
 	"gopkg.in/yaml.v3"
-
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
 

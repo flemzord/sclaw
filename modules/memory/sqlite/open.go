@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/flemzord/sclaw/internal/memory"
-
 	_ "modernc.org/sqlite" // SQLite driver registration
 )
 

@@ -13,7 +13,6 @@ import (
 	"sync"
 
 	"github.com/flemzord/sclaw/internal/security"
-
 	"github.com/go-chi/chi/v5"
 )
 

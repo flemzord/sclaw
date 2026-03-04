@@ -19,6 +19,9 @@ linters:
 formatters:
   enable:
     - gofumpt
+    - gofmt
+    - gci
+    - goimports
 
 issues:
   max-issues-per-linter: 0

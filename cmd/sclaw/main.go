@@ -8,9 +8,6 @@ import (
 
 	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
-	"github.com/flemzord/sclaw/pkg/app"
-	"github.com/spf13/cobra"
-
 	_ "github.com/flemzord/sclaw/internal/gateway"
 	_ "github.com/flemzord/sclaw/modules/channel/telegram"
 	_ "github.com/flemzord/sclaw/modules/memory/sqlite"
@@ -19,6 +16,8 @@ import (
 	_ "github.com/flemzord/sclaw/modules/tool/file_read"
 	_ "github.com/flemzord/sclaw/modules/tool/file_write"
 	_ "github.com/flemzord/sclaw/modules/tool/shell"
+	"github.com/flemzord/sclaw/pkg/app"
+	"github.com/spf13/cobra"
 )
 
 // Set by goreleaser ldflags.
