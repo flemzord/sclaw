@@ -188,7 +188,7 @@ func LoadSkillsFromFS(fsys fs.FS, pathPrefix string) ([]Skill, error) {
 		return nil, fmt.Errorf("skill: reading embedded FS root: %w", err)
 	}
 
-	var skills []Skill
+	skills := make([]Skill, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			sub := loadSkillsFromSubFS(fsys, entry.Name(), pathPrefix)
@@ -223,7 +223,7 @@ func loadSkillsFromSubFS(fsys fs.FS, dir, pathPrefix string) []Skill {
 		return nil
 	}
 
-	var skills []Skill
+	skills := make([]Skill, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
 			continue
