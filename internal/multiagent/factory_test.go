@@ -11,7 +11,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/provider/providertest"
 	"github.com/flemzord/sclaw/internal/router"
@@ -350,7 +349,7 @@ func TestMultiAgentFactory_BuildLoopConfig_InvalidTimeout(t *testing.T) {
 	}
 }
 
-func TestFactory_ResolveHistory_WithOverride(t *testing.T) {
+func TestFactory_ResolveHistory_PerAgentSQLite(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -369,13 +368,9 @@ func TestFactory_ResolveHistory_WithOverride(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 
-	// Use an in-memory store as the module-provided override.
-	override := memory.NewInMemoryHistoryStore()
-
 	factory := NewFactory(FactoryConfig{
-		Registry:     reg,
-		Logger:       slog.Default(),
-		HistoryStore: override,
+		Registry: reg,
+		Logger:   slog.Default(),
 	})
 	defer func() { _ = factory.Close() }()
 
@@ -383,14 +378,17 @@ func TestFactory_ResolveHistory_WithOverride(t *testing.T) {
 	if store == nil {
 		t.Fatal("expected non-nil store")
 	}
-	if store != override {
-		t.Error("expected ResolveHistory to return the injected HistoryStore, not a new SQLite store")
+
+	// Verify per-agent DB file was created.
+	dbPath := filepath.Join(agents["bot"].DataDir, "memory.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Errorf("expected per-agent DB at %s", dbPath)
 	}
 
 	// Second call should return the same cached instance.
 	store2 := factory.ResolveHistory("bot")
-	if store2 != override {
-		t.Error("expected cached store to be the injected override")
+	if store2 != store {
+		t.Error("expected cached store on second call")
 	}
 }
 
@@ -487,6 +485,104 @@ func TestFactory_ResolveHistory_UnknownAgent(t *testing.T) {
 	}
 }
 
+func TestFactory_ResolveFactStore(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	agents := map[string]AgentConfig{
+		"bot": {
+			DataDir: filepath.Join(tmpDir, "agents", "bot"),
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	ResolveDefaults(agents, tmpDir)
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"bot"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+	defer func() { _ = factory.Close() }()
+
+	factStore := factory.ResolveFactStore("bot")
+	if factStore == nil {
+		t.Fatal("expected non-nil fact store")
+	}
+
+	// Should also have opened the history store.
+	histStore := factory.ResolveHistory("bot")
+	if histStore == nil {
+		t.Fatal("expected non-nil history store after ResolveFactStore")
+	}
+
+	// Second call should return cached instance.
+	factStore2 := factory.ResolveFactStore("bot")
+	if factStore2 != factStore {
+		t.Error("expected same fact store instance on second call (cache hit)")
+	}
+}
+
+func TestFactory_ResolveFactStore_Disabled(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	disabled := false
+	agents := map[string]AgentConfig{
+		"silent": {
+			DataDir: filepath.Join(tmpDir, "agents", "silent"),
+			Memory:  MemoryConfig{Enabled: &disabled},
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	if err := EnsureDirectories(agents); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	reg, err := NewRegistry(agents, []string{"silent"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+	defer func() { _ = factory.Close() }()
+
+	factStore := factory.ResolveFactStore("silent")
+	if factStore != nil {
+		t.Error("expected nil fact store for agent with memory disabled")
+	}
+}
+
+func TestFactory_ResolveFactStore_UnknownAgent(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"known": {Routing: RoutingConfig{Default: true}},
+	}
+	reg, err := NewRegistry(agents, []string{"known"})
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	factory := NewFactory(FactoryConfig{
+		Registry: reg,
+		Logger:   slog.Default(),
+	})
+	defer func() { _ = factory.Close() }()
+
+	factStore := factory.ResolveFactStore("ghost")
+	if factStore != nil {
+		t.Error("expected nil fact store for unknown agent")
+	}
+}
+
 func TestFactory_Close(t *testing.T) {
 	t.Parallel()
 
@@ -523,17 +619,29 @@ func TestFactory_Close(t *testing.T) {
 		t.Fatal("expected non-nil store for agent b")
 	}
 
+	// Verify fact stores were also opened.
+	if s := factory.ResolveFactStore("a"); s == nil {
+		t.Fatal("expected non-nil fact store for agent a")
+	}
+	if s := factory.ResolveFactStore("b"); s == nil {
+		t.Fatal("expected non-nil fact store for agent b")
+	}
+
 	// Close should not error.
 	if err := factory.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// After Close, stores map should be reset.
+	// After Close, stores maps should be reset.
 	factory.mu.RLock()
-	n := len(factory.stores)
+	nStores := len(factory.stores)
+	nFacts := len(factory.factStores)
 	factory.mu.RUnlock()
-	if n != 0 {
-		t.Errorf("stores map has %d entries after Close, want 0", n)
+	if nStores != 0 {
+		t.Errorf("stores map has %d entries after Close, want 0", nStores)
+	}
+	if nFacts != 0 {
+		t.Errorf("factStores map has %d entries after Close, want 0", nFacts)
 	}
 }
 

@@ -54,11 +54,6 @@ type FactoryConfig struct {
 	// GlobalSkillsDir is the path to the global skills directory.
 	// Skills in this directory are available to all agents by default.
 	GlobalSkillsDir string
-
-	// HistoryStore, if non-nil, is used for all agents instead of
-	// opening per-agent SQLite databases. Provided by the active
-	// memory module (e.g., memory.obsidian or memory.sqlite).
-	HistoryStore memory.HistoryStore
 }
 
 // Factory resolves the agent for a session and creates an agent.Loop
@@ -72,10 +67,11 @@ type Factory struct {
 
 	subAgentMgr *subagent.Manager
 
-	mu     sync.RWMutex
-	stores map[string]memory.HistoryStore
-	souls  map[string]workspace.SoulProvider
-	dbs    []*sql.DB
+	mu         sync.RWMutex
+	stores     map[string]memory.HistoryStore
+	factStores map[string]memory.Store
+	souls      map[string]workspace.SoulProvider
+	dbs        []*sql.DB
 }
 
 // Compile-time checks.
@@ -89,9 +85,10 @@ var (
 // NewFactory creates a Factory from the given configuration.
 func NewFactory(cfg FactoryConfig) *Factory {
 	f := &Factory{
-		cfg:    cfg,
-		stores: make(map[string]memory.HistoryStore),
-		souls:  make(map[string]workspace.SoulProvider),
+		cfg:        cfg,
+		stores:     make(map[string]memory.HistoryStore),
+		factStores: make(map[string]memory.Store),
+		souls:      make(map[string]workspace.SoulProvider),
 	}
 	f.registry.Store(cfg.Registry)
 	return f
@@ -256,32 +253,54 @@ func (f *Factory) ResolveHistory(agentID string) memory.HistoryStore {
 		return nil
 	}
 
-	// Use module-provided store if available.
-	if f.cfg.HistoryStore != nil {
-		f.stores[agentID] = f.cfg.HistoryStore
-		return f.cfg.HistoryStore
+	// Per-agent SQLite: opens both history and fact stores from a single DB.
+	dbPath := filepath.Join(agentCfg.DataDir, "memory.db")
+
+	logger := f.cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
 
-	// Fallback: per-agent SQLite.
-	dbPath := filepath.Join(agentCfg.DataDir, "memory.db")
-	store, db, err := sqlite.OpenHistoryStore(dbPath)
+	histStore, factStore, db, err := sqlite.OpenStores(dbPath, logger)
 	if err != nil {
 		if f.cfg.Logger != nil {
-			f.cfg.Logger.Error("multiagent: failed to open history store",
+			f.cfg.Logger.Error("multiagent: failed to open memory stores",
 				"agent", agentID, "path", dbPath, "error", err)
 		}
 		f.stores[agentID] = nil
 		return nil
 	}
 
-	f.stores[agentID] = store
+	f.stores[agentID] = histStore
+	f.factStores[agentID] = factStore
 	f.dbs = append(f.dbs, db)
 
 	if f.cfg.Logger != nil {
-		f.cfg.Logger.Info("multiagent: opened history store",
+		f.cfg.Logger.Info("multiagent: opened per-agent memory stores",
 			"agent", agentID, "path", dbPath)
 	}
-	return store
+	return histStore
+}
+
+// ResolveFactStore returns the persistent fact Store for the given agent.
+// Returns nil if memory is disabled or the agent has no DataDir.
+// The store is lazily opened on first access (via ResolveHistory) and cached.
+func (f *Factory) ResolveFactStore(agentID string) memory.Store {
+	// Fast path: read lock.
+	f.mu.RLock()
+	if s, ok := f.factStores[agentID]; ok {
+		f.mu.RUnlock()
+		return s
+	}
+	f.mu.RUnlock()
+
+	// Trigger lazy open of both stores via ResolveHistory.
+	f.ResolveHistory(agentID)
+
+	// Read back the cached fact store.
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.factStores[agentID]
 }
 
 // ResolveSoul returns the system prompt for the given agent.
@@ -513,10 +532,12 @@ func (f *Factory) Reload(newRegistry *Registry) {
 		newCfg, newOK := newRegistry.AgentConfig(agentID)
 		if !newOK {
 			delete(f.stores, agentID)
+			delete(f.factStores, agentID)
 			continue
 		}
 		if oldOK && (oldCfg.DataDir != newCfg.DataDir || oldCfg.Memory.IsEnabled() != newCfg.Memory.IsEnabled()) {
 			delete(f.stores, agentID)
+			delete(f.factStores, agentID)
 		}
 	}
 
@@ -541,5 +562,6 @@ func (f *Factory) Close() error {
 	}
 	f.dbs = nil
 	f.stores = make(map[string]memory.HistoryStore)
+	f.factStores = make(map[string]memory.Store)
 	return firstErr
 }

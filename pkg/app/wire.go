@@ -163,12 +163,6 @@ func wireRouter(
 		urlFilter, _ = svc.(*security.URLFilter)
 	}
 
-	// Resolve memory module's history store (if any).
-	var historyStore memory.HistoryStore
-	if svc, ok := appCtx.GetService("memory.history"); ok {
-		historyStore, _ = svc.(memory.HistoryStore)
-	}
-
 	// Build the global tool registry.
 	// First, discover tools from ToolProvider modules (configurable replacements).
 	// Then, register built-in tools only for names not already covered by a module.
@@ -245,7 +239,6 @@ func wireRouter(
 		RateLimiter:     rateLimiter,
 		URLFilter:       urlFilter,
 		SanitizedEnv:    sanitizedEnv,
-		HistoryStore:    historyStore,
 		BuiltinSkillsFS: skills.BuiltinFS,
 		GlobalSkillsDir: globalSkillsDir,
 	})
@@ -368,8 +361,7 @@ type schedulerModule struct {
 	dataDir      string
 	sessionStore cron.SessionStore
 	ranger       cron.SessionRanger
-	historyStore memory.HistoryStore
-	memoryStore  memory.Store
+	factory      *multiagent.Factory
 	extractor    memory.FactExtractor
 	loopBuilder  cron.LoopBuilder
 	outputSender cron.OutputSender
@@ -434,13 +426,20 @@ func (m *schedulerModule) Reload(ctx *core.AppContext) error {
 			}
 		}
 
+		var agentHistory memory.HistoryStore
+		var agentFactStore memory.Store
+		if m.factory != nil {
+			agentHistory = m.factory.ResolveHistory(agentID)
+			agentFactStore = m.factory.ResolveFactStore(agentID)
+		}
+
 		if err := newScheduler.RegisterJob(&cron.MemoryExtractionJob{
 			Logger:       m.logger,
 			AgentID:      agentID,
 			ScheduleExpr: cronCfg.MemoryExtraction.ScheduleOrDefault(),
 			Sessions:     m.ranger,
-			History:      m.historyStore,
-			Store:        m.memoryStore,
+			History:      agentHistory,
+			Store:        agentFactStore,
 			Extractor:    m.extractor,
 		}); err != nil {
 			return fmt.Errorf("cron: registering memory extraction for agent %s: %w", agentID, err)
@@ -510,15 +509,12 @@ func wireCron(
 		}
 	}
 
-	// Resolve memory dependencies for fact extraction.
-	var historyStore memory.HistoryStore
-	if svc, ok := appCtx.GetService("memory.history"); ok {
-		historyStore, _ = svc.(memory.HistoryStore)
+	// Resolve factory for per-agent memory stores (optional — only when router is wired).
+	var factory *multiagent.Factory
+	if svc, ok := appCtx.GetService("multiagent.factory"); ok {
+		factory, _ = svc.(*multiagent.Factory)
 	}
-	var memoryStore memory.Store
-	if svc, ok := appCtx.GetService("memory.store"); ok {
-		memoryStore, _ = svc.(memory.Store)
-	}
+
 	var extractor memory.FactExtractor
 	if svc, ok := appCtx.GetService("provider.default"); ok {
 		if p, ok := svc.(provider.Provider); ok {
@@ -562,13 +558,20 @@ func wireCron(
 				}
 			}
 
+			var agentHistory memory.HistoryStore
+			var agentFactStore memory.Store
+			if factory != nil {
+				agentHistory = factory.ResolveHistory(agentID)
+				agentFactStore = factory.ResolveFactStore(agentID)
+			}
+
 			if err := s.RegisterJob(&cron.MemoryExtractionJob{
 				Logger:       logger,
 				AgentID:      agentID,
 				ScheduleExpr: cronCfg.MemoryExtraction.ScheduleOrDefault(),
 				Sessions:     ranger,
-				History:      historyStore,
-				Store:        memoryStore,
+				History:      agentHistory,
+				Store:        agentFactStore,
 				Extractor:    extractor,
 			}); err != nil {
 				return fmt.Errorf("cron: registering memory extraction for agent %s: %w", agentID, err)
@@ -616,11 +619,19 @@ func wireCron(
 			}
 		}
 
+		// Single-agent fallback: resolve stores for "default" agent via factory.
+		var defaultHistory memory.HistoryStore
+		var defaultFactStore memory.Store
+		if factory != nil {
+			defaultHistory = factory.ResolveHistory("default")
+			defaultFactStore = factory.ResolveFactStore("default")
+		}
+
 		if err := s.RegisterJob(&cron.MemoryExtractionJob{
 			Logger:    logger,
 			Sessions:  ranger,
-			History:   historyStore,
-			Store:     memoryStore,
+			History:   defaultHistory,
+			Store:     defaultFactStore,
 			Extractor: extractor,
 		}); err != nil {
 			return fmt.Errorf("cron: registering memory extraction: %w", err)
@@ -636,8 +647,7 @@ func wireCron(
 		dataDir:      appCtx.DataDir,
 		sessionStore: sessionStore,
 		ranger:       ranger,
-		historyStore: historyStore,
-		memoryStore:  memoryStore,
+		factory:      factory,
 		extractor:    extractor,
 		loopBuilder:  loopBuilder,
 		outputSender: outputSender,
