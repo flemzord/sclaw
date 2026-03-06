@@ -145,9 +145,30 @@ sclaw implements defense-in-depth security across the entire message pipeline:
 | Webhook validation | HMAC-SHA256 signature verification per source | `internal/gateway/webhook.go` |
 | Plugin certification | Ed25519 signature verification with trusted key list | `internal/cert/` |
 | Config tool safety | Hash-based optimistic locking, validation before write, secret redaction, fixed path | `internal/tool/configtool/` |
-| 1Password integration | `op://` secret references resolved via `op read` at config load | `internal/config/onepassword.go` |
+| 1Password integration | `op://` secret references resolved via `op read` at config load; multi-account support via `onepassword.account` | `internal/config/onepassword.go` |
 
 See `docs/security/prompt-injection.md` for the full threat model and mitigation details.
+
+## 1Password Integration
+
+Config values can reference 1Password secrets using `op://vault/item/field` syntax. References are resolved at config load time via the `op` CLI before YAML parsing.
+
+### Multi-Account Support
+
+When multiple 1Password accounts are signed in, the `op` CLI uses the default account. To target a specific account, add a top-level `onepassword` section:
+
+```yaml
+version: "1"
+
+onepassword:
+  account: "H5C3ZIZVEVEHJLU5XRCTR2DZBM"  # Account UUID or shorthand
+
+modules:
+  channel.telegram:
+    token: "op://MyVault/Token-Telegram/password"
+```
+
+The `account` value is passed as `--account` to `op read`. Find your account UUID with `op account list --format=json`.
 
 ## Skills
 
