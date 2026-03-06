@@ -160,8 +160,10 @@ func (p *Provider) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// doStream acquires a WebSocket connection, sends the response.create event,
-// and returns the stream channel. On error, the connection is invalidated.
+// doStream acquires a fresh WebSocket connection, sends the response.create
+// event, and returns the stream channel. The connection is always closed when
+// the stream completes (coder/websocket closes on any context cancellation,
+// making connection reuse impractical).
 func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest) (<-chan provider.StreamChunk, error) {
 	conn, err := p.conn.getConn(ctx)
 	if err != nil {
@@ -171,7 +173,7 @@ func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest)
 	event := buildClientEvent(p.config, req)
 	payload, err := json.Marshal(event)
 	if err != nil {
-		p.conn.release()
+		p.conn.invalidate()
 		return nil, fmt.Errorf("marshal response.create: %w", err)
 	}
 
@@ -180,51 +182,26 @@ func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-
-		// Retry once with a fresh connection. This covers the small window
-		// between stopping the idle reader and writing where the server may
-		// have already closed the connection.
-		p.logger.Debug("WebSocket write failed, retrying with fresh connection", "error", err)
-		conn, err = p.conn.getConn(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
-			p.conn.invalidate()
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, fmt.Errorf("%w: WebSocket write (retry): %w", provider.ErrProviderDown, err)
-		}
+		return nil, fmt.Errorf("%w: WebSocket write: %w", provider.ErrProviderDown, err)
 	}
 
 	ch := readLoop(ctx, conn)
 
-	// Wrap to invalidate connection on error and release when done.
+	// Wrap to close the connection when the stream completes.
 	out := make(chan provider.StreamChunk, 16)
 	go func() {
 		defer close(out)
-		var hadError bool
+		defer p.conn.invalidate()
 		for chunk := range ch {
-			if chunk.Err != nil {
-				hadError = true
-			}
 			select {
 			case out <- chunk:
 			case <-ctx.Done():
-				// Emit context error before closing so callers see it.
 				select {
 				case out <- provider.StreamChunk{Err: ctx.Err()}:
 				default:
 				}
-				p.conn.invalidate()
 				return
 			}
-		}
-		if hadError {
-			p.conn.invalidate()
-		} else {
-			p.conn.release()
 		}
 	}()
 

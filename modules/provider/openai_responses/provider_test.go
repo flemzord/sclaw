@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -483,38 +482,27 @@ func TestReconnectionAfterInvalidate(t *testing.T) {
 	}
 }
 
-func TestWriteRetryOnStaleConnection(t *testing.T) {
-	var connectCount atomic.Int32
+func TestFreshConnectionPerRequest(t *testing.T) {
+	connectCount := 0
 	srv := mockWSServer(t, func(conn *websocket.Conn) {
-		n := connectCount.Add(1)
-
-		if n == 1 {
-			// First connection: close immediately to simulate stale conn.
-			// The idle reader will detect this and invalidate.
-			time.Sleep(30 * time.Millisecond)
-			conn.Close(websocket.StatusInternalError, "stale") //nolint:errcheck
-			return
-		}
-
-		// Second connection: handle normally.
+		connectCount++
 		_, _, err := conn.Read(context.Background())
 		if err != nil {
-			t.Logf("read: %v", err)
 			return
 		}
 		writeJSON(t, conn, serverEvent{
 			Type:  "response.output_text.delta",
-			Delta: "retried",
+			Delta: "ok",
 		})
 		writeJSON(t, conn, serverEvent{
 			Type: "response.completed",
 			Response: &responseCompleted{
-				ID:     "resp_retry",
+				ID:     "resp_fresh",
 				Status: "completed",
 				Output: []outputItem{
 					{
 						Type: "message", Role: "assistant",
-						Content: []outputContentPart{{Type: "output_text", Text: "retried"}},
+						Content: []outputContentPart{{Type: "output_text", Text: "ok"}},
 					},
 				},
 				Usage: &wireUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
@@ -526,31 +514,23 @@ func TestWriteRetryOnStaleConnection(t *testing.T) {
 	p := &Provider{config: cfg, logger: testLogger()}
 	p.conn = newConnManager(cfg, testLogger())
 
-	// First getConn + release to establish connection, then let it go stale.
-	conn, err := p.conn.getConn(context.Background())
-	if err != nil {
-		t.Fatalf("initial getConn: %v", err)
+	// Two consecutive requests should each get a fresh connection.
+	for i := 0; i < 2; i++ {
+		resp, err := p.Complete(context.Background(), provider.CompletionRequest{
+			Messages: []provider.LLMMessage{
+				{Role: provider.MessageRoleUser, Content: "Hi"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("request %d: %v", i+1, err)
+		}
+		if resp.Content != "ok" {
+			t.Errorf("request %d: content = %q, want %q", i+1, resp.Content, "ok")
+		}
 	}
-	_ = conn
-	p.conn.release()
 
-	// Wait for server to close the first connection.
-	time.Sleep(100 * time.Millisecond)
-
-	// Now Complete should succeed via write retry.
-	resp, err := p.Complete(context.Background(), provider.CompletionRequest{
-		Messages: []provider.LLMMessage{
-			{Role: provider.MessageRoleUser, Content: "test"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Complete after stale conn: %v", err)
-	}
-	if resp.Content != "retried" {
-		t.Errorf("content = %q, want %q", resp.Content, "retried")
-	}
-	if got := connectCount.Load(); got < 2 {
-		t.Errorf("connect count = %d, want >= 2", got)
+	if connectCount < 2 {
+		t.Errorf("connectCount = %d, want >= 2 (fresh conn per request)", connectCount)
 	}
 }
 

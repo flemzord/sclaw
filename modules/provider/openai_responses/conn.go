@@ -6,33 +6,28 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/flemzord/sclaw/internal/provider"
 )
 
-// connManager manages a single WebSocket connection with lazy dial,
-// automatic reconnection on stale/closed connections, and max-age lifecycle.
+// connManager manages WebSocket connections to the Responses API.
 //
-// The Responses API allows only one response per connection at a time,
-// and the ReAct loop is sequential, so no pooling is needed.
+// The coder/websocket library closes the connection on any error, including
+// context cancellation (see Conn doc: "This applies to context expirations
+// as well unfortunately"). This makes connection reuse impractical:
+// there is no way to stop an idle Read without closing the connection.
 //
-// When the connection is idle (not in use), a background goroutine calls
-// conn.Read() in a loop so that the coder/websocket library can respond
-// to server keepalive pings. Without this, idle connections get closed
-// by the server with "keepalive ping timeout".
+// Instead, each request dials a fresh connection. The ~200ms dial overhead
+// is negligible compared to LLM response latency.
 type connManager struct {
 	cfg    Config
 	logger *slog.Logger
 
-	mu         sync.Mutex
-	conn       *websocket.Conn
-	created    time.Time
-	inUse      bool
-	closed     bool
-	idleCancel context.CancelFunc // cancels the idle reader goroutine
-	idleDone   chan struct{}       // closed when the idle reader exits
+	mu     sync.Mutex
+	conn   *websocket.Conn
+	inUse  bool
+	closed bool
 }
 
 // newConnManager creates a new connection manager.
@@ -46,16 +41,6 @@ func newConnManager(cfg Config, logger *slog.Logger) *connManager {
 // getConn returns a valid WebSocket connection, dialing a new one if necessary.
 // It marks the connection as in-use; callers must call release() when done.
 func (cm *connManager) getConn(ctx context.Context) (*websocket.Conn, error) {
-	// Stop the idle reader first (outside the lock to avoid deadlock:
-	// the goroutine may need mu when it encounters a real error).
-	cm.mu.Lock()
-	cancel, done := cm.idleCancel, cm.idleDone
-	cm.idleCancel = nil
-	cm.idleDone = nil
-	cm.mu.Unlock()
-
-	cm.stopIdleReader(cancel, done)
-
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -67,120 +52,59 @@ func (cm *connManager) getConn(ctx context.Context) (*websocket.Conn, error) {
 		return nil, fmt.Errorf("%w: connection already in use", provider.ErrProviderDown)
 	}
 
-	// Recycle stale connections.
-	if cm.conn != nil && time.Since(cm.created) > cm.cfg.ConnMaxAge {
-		cm.logger.Debug("recycling stale WebSocket connection", "age", time.Since(cm.created))
+	// Always dial fresh — connection reuse is not reliable with coder/websocket
+	// because cancelling a Read (needed to stop an idle reader) closes the conn.
+	if cm.conn != nil {
 		cm.conn.CloseNow() //nolint:errcheck // best-effort close
 		cm.conn = nil
 	}
 
-	// Dial a new connection if needed.
-	if cm.conn == nil {
-		conn, err := cm.dial(ctx)
-		if err != nil {
-			return nil, err
-		}
-		cm.conn = conn
-		cm.created = time.Now()
+	conn, err := cm.dial(ctx)
+	if err != nil {
+		return nil, err
 	}
-
+	cm.conn = conn
 	cm.inUse = true
 	return cm.conn, nil
 }
 
-// release marks the connection as available for reuse and starts the
-// idle reader goroutine to handle server keepalive pings.
+// release marks the connection as no longer in use and closes it.
+// The next getConn call will dial a fresh connection.
 func (cm *connManager) release() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
 	cm.inUse = false
-
-	if cm.conn != nil && !cm.closed {
-		cm.startIdleReaderLocked()
+	if cm.conn != nil {
+		cm.conn.CloseNow() //nolint:errcheck // best-effort close
+		cm.conn = nil
 	}
 }
 
 // invalidate closes the current connection so a fresh one is dialed next time.
 func (cm *connManager) invalidate() {
 	cm.mu.Lock()
-	cancel, done := cm.idleCancel, cm.idleDone
-	cm.idleCancel = nil
-	cm.idleDone = nil
+	defer cm.mu.Unlock()
 
 	if cm.conn != nil {
 		cm.conn.CloseNow() //nolint:errcheck // best-effort close
 		cm.conn = nil
 	}
 	cm.inUse = false
-	cm.mu.Unlock()
-
-	cm.stopIdleReader(cancel, done)
 }
 
 // Close permanently shuts down the connection manager.
 func (cm *connManager) Close() error {
 	cm.mu.Lock()
-	cancel, done := cm.idleCancel, cm.idleDone
-	cm.idleCancel = nil
-	cm.idleDone = nil
+	defer cm.mu.Unlock()
 
 	cm.closed = true
-	var err error
 	if cm.conn != nil {
-		err = cm.conn.Close(websocket.StatusNormalClosure, "shutdown")
+		err := cm.conn.Close(websocket.StatusNormalClosure, "shutdown")
 		cm.conn = nil
+		return err
 	}
-	cm.mu.Unlock()
-
-	cm.stopIdleReader(cancel, done)
-	return err
-}
-
-// startIdleReaderLocked starts the idle reader goroutine.
-// Must be called with cm.mu held.
-func (cm *connManager) startIdleReaderLocked() {
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	cm.idleCancel = cancel
-	cm.idleDone = done
-	go cm.idleReader(ctx, cm.conn, done)
-}
-
-// idleReader reads from the WebSocket in a loop so the library can respond
-// to server keepalive pings. It exits when ctx is cancelled or a real error occurs.
-func (cm *connManager) idleReader(ctx context.Context, conn *websocket.Conn, done chan struct{}) {
-	defer close(done)
-	for {
-		_, _, err := conn.Read(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				// Normal shutdown: getConn or Close cancelled us.
-				return
-			}
-			// Real error: connection is dead, invalidate it.
-			cm.mu.Lock()
-			if cm.conn == conn {
-				cm.logger.Debug("idle reader: connection error, invalidating", "error", err)
-				conn.CloseNow() //nolint:errcheck // best-effort close
-				cm.conn = nil
-			}
-			cm.mu.Unlock()
-			return
-		}
-		// Unexpected data message from server while idle — discard it.
-		cm.logger.Debug("idle reader: discarding unexpected message")
-	}
-}
-
-// stopIdleReader cancels the idle reader goroutine and waits for it to exit.
-func (cm *connManager) stopIdleReader(cancel context.CancelFunc, done chan struct{}) {
-	if cancel != nil {
-		cancel()
-	}
-	if done != nil {
-		<-done
-	}
+	return nil
 }
 
 // dial establishes a new WebSocket connection to the Responses API.
