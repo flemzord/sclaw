@@ -180,7 +180,22 @@ func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("%w: WebSocket write: %w", provider.ErrProviderDown, err)
+
+		// Retry once with a fresh connection. This covers the small window
+		// between stopping the idle reader and writing where the server may
+		// have already closed the connection.
+		p.logger.Debug("WebSocket write failed, retrying with fresh connection", "error", err)
+		conn, err = p.conn.getConn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+			p.conn.invalidate()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, fmt.Errorf("%w: WebSocket write (retry): %w", provider.ErrProviderDown, err)
+		}
 	}
 
 	ch := readLoop(ctx, conn)

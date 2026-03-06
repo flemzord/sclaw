@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -479,6 +480,77 @@ func TestReconnectionAfterInvalidate(t *testing.T) {
 	}
 	if connectCount < 2 {
 		t.Errorf("connectCount = %d, want >= 2", connectCount)
+	}
+}
+
+func TestWriteRetryOnStaleConnection(t *testing.T) {
+	var connectCount atomic.Int32
+	srv := mockWSServer(t, func(conn *websocket.Conn) {
+		n := connectCount.Add(1)
+
+		if n == 1 {
+			// First connection: close immediately to simulate stale conn.
+			// The idle reader will detect this and invalidate.
+			time.Sleep(30 * time.Millisecond)
+			conn.Close(websocket.StatusInternalError, "stale") //nolint:errcheck
+			return
+		}
+
+		// Second connection: handle normally.
+		_, _, err := conn.Read(context.Background())
+		if err != nil {
+			t.Logf("read: %v", err)
+			return
+		}
+		writeJSON(t, conn, serverEvent{
+			Type:  "response.output_text.delta",
+			Delta: "retried",
+		})
+		writeJSON(t, conn, serverEvent{
+			Type: "response.completed",
+			Response: &responseCompleted{
+				ID:     "resp_retry",
+				Status: "completed",
+				Output: []outputItem{
+					{
+						Type: "message", Role: "assistant",
+						Content: []outputContentPart{{Type: "output_text", Text: "retried"}},
+					},
+				},
+				Usage: &wireUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
+			},
+		})
+	})
+
+	cfg := testConfig(wsURL(srv))
+	p := &Provider{config: cfg, logger: testLogger()}
+	p.conn = newConnManager(cfg, testLogger())
+
+	// First getConn + release to establish connection, then let it go stale.
+	conn, err := p.conn.getConn(context.Background())
+	if err != nil {
+		t.Fatalf("initial getConn: %v", err)
+	}
+	_ = conn
+	p.conn.release()
+
+	// Wait for server to close the first connection.
+	time.Sleep(100 * time.Millisecond)
+
+	// Now Complete should succeed via write retry.
+	resp, err := p.Complete(context.Background(), provider.CompletionRequest{
+		Messages: []provider.LLMMessage{
+			{Role: provider.MessageRoleUser, Content: "test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Complete after stale conn: %v", err)
+	}
+	if resp.Content != "retried" {
+		t.Errorf("content = %q, want %q", resp.Content, "retried")
+	}
+	if got := connectCount.Load(); got < 2 {
+		t.Errorf("connect count = %d, want >= 2", got)
 	}
 }
 
