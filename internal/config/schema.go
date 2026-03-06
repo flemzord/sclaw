@@ -24,6 +24,16 @@ type Config struct {
 
 	// Security holds optional security settings for plugin certification.
 	Security *SecurityConfig `yaml:"security,omitempty"`
+
+	// OnePassword holds 1Password CLI settings for op:// secret resolution.
+	OnePassword *OnePasswordConfig `yaml:"onepassword,omitempty"`
+}
+
+// OnePasswordConfig holds 1Password CLI settings.
+type OnePasswordConfig struct {
+	// Account is the 1Password account UUID or shorthand to use with --account.
+	// Required when multiple accounts are signed in and the default is not correct.
+	Account string `yaml:"account,omitempty"`
 }
 
 // PluginEntry identifies a third-party Go module to include in the build.

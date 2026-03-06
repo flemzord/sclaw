@@ -9,7 +9,7 @@ import (
 
 // stubOP replaces both opLookPathFunc and opRunnerFunc for the duration of a test.
 // It returns a cleanup function that restores the originals.
-func stubOP(t *testing.T, runner func(string) (string, error)) {
+func stubOP(t *testing.T, runner func(string, string) (string, error)) {
 	t.Helper()
 	origLookPath := opLookPathFunc
 	origRunner := opRunnerFunc
@@ -33,7 +33,7 @@ func TestResolveOnePassword_NoRefs(t *testing.T) {
 }
 
 func TestResolveOnePassword_SingleRef(t *testing.T) {
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		if ref == "op://vault/item/field" {
 			return "secret123", nil
 		}
@@ -56,7 +56,7 @@ func TestResolveOnePassword_MultipleRefs(t *testing.T) {
 		"op://vault/item/token":   "tok_abc",
 		"op://vault/item/api-key": "key_xyz",
 	}
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		v, ok := secrets[ref]
 		if !ok {
 			return "", fmt.Errorf("unexpected ref: %s", ref)
@@ -80,7 +80,7 @@ func TestResolveOnePassword_MultipleRefs(t *testing.T) {
 
 func TestResolveOnePassword_Deduplication(t *testing.T) {
 	var callCount atomic.Int32
-	stubOP(t, func(_ string) (string, error) {
+	stubOP(t, func(_, _ string) (string, error) {
 		callCount.Add(1)
 		return "resolved", nil
 	})
@@ -99,7 +99,7 @@ func TestResolveOnePassword_Deduplication(t *testing.T) {
 }
 
 func TestResolveOnePassword_ErrorAccumulation(t *testing.T) {
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		return "", fmt.Errorf("failed: %s", ref)
 	})
 
@@ -117,7 +117,7 @@ func TestResolveOnePassword_ErrorAccumulation(t *testing.T) {
 }
 
 func TestResolveOnePassword_TwoSegmentError(t *testing.T) {
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		t.Fatalf("op runner should not be called for invalid ref, got: %s", ref)
 		return "", nil
 	})
@@ -135,8 +135,62 @@ func TestResolveOnePassword_TwoSegmentError(t *testing.T) {
 	}
 }
 
+func TestResolveOnePassword_AccountPassedToRunner(t *testing.T) {
+	stubOP(t, func(ref, account string) (string, error) {
+		if account != "MYACCOUNT123" {
+			t.Errorf("expected account MYACCOUNT123, got %q", account)
+		}
+		return "resolved", nil
+	})
+
+	input := []byte("onepassword:\n  account: MYACCOUNT123\ntoken: op://vault/item/field")
+	result, err := resolveOnePassword(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(result), "op://") {
+		t.Errorf("result still contains op:// references: %s", string(result))
+	}
+}
+
+func TestResolveOnePassword_NoAccountDefault(t *testing.T) {
+	stubOP(t, func(_, account string) (string, error) {
+		if account != "" {
+			t.Errorf("expected empty account, got %q", account)
+		}
+		return "resolved", nil
+	})
+
+	input := []byte("token: op://vault/item/field")
+	_, err := resolveOnePassword(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractOPAccount(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"with account", "onepassword:\n  account: ABC123\nmodules:", "ABC123"},
+		{"quoted account", "onepassword:\n  account: \"ABC123\"\nmodules:", "ABC123"},
+		{"no onepassword section", "version: \"1\"\nmodules:", ""},
+		{"empty account", "onepassword:\n  account: \nmodules:", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractOPAccount([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("extractOPAccount() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveOnePassword_FourSegmentPath(t *testing.T) {
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		if ref == "op://vault/item/section/field" {
 			return "deep_secret", nil
 		}

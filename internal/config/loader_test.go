@@ -150,7 +150,7 @@ func TestExpandEnv_MultipleErrors(t *testing.T) {
 }
 
 func TestLoad_WithOnePasswordExpansion(t *testing.T) {
-	stubOP(t, func(ref string) (string, error) {
+	stubOP(t, func(ref, _ string) (string, error) {
 		if ref == "op://Private/sclaw/test-key" {
 			return "op_resolved_value", nil
 		}

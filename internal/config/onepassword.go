@@ -22,15 +22,22 @@ var opLookPathFunc = func() error {
 }
 
 // opRunnerFunc executes "op read" for a single reference and returns the secret value.
+// The second argument is an optional account identifier (UUID or shorthand).
 // It is a package variable so tests can replace it without touching the real CLI.
 var opRunnerFunc = opCLIRunner
 
 // opCLIRunner is the production implementation that shells out to the 1Password CLI.
-func opCLIRunner(ref string) (string, error) {
+func opCLIRunner(ref, account string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "op", "read", "--no-newline", ref)
+	args := []string{"read", "--no-newline"}
+	if account != "" {
+		args = append(args, "--account", account)
+	}
+	args = append(args, ref)
+
+	cmd := exec.CommandContext(ctx, "op", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -40,6 +47,19 @@ func opCLIRunner(ref string) (string, error) {
 		return "", fmt.Errorf("op read %s: %w", ref, err)
 	}
 	return string(out), nil
+}
+
+// accountPattern extracts the onepassword.account value from raw YAML before full parsing.
+var accountPattern = regexp.MustCompile(`(?m)^onepassword:[ \t]*\n[ \t]+account:[ \t]*"?([A-Za-z0-9_-]+)"?`)
+
+// extractOPAccount does a lightweight regex extraction of onepassword.account
+// from raw YAML bytes, avoiding a full unmarshal before secret resolution.
+func extractOPAccount(raw []byte) string {
+	m := accountPattern.FindSubmatch(raw)
+	if m == nil {
+		return ""
+	}
+	return string(m[1])
 }
 
 // resolveOnePassword replaces all op:// references in raw YAML bytes with
@@ -56,6 +76,9 @@ func resolveOnePassword(raw []byte) ([]byte, error) {
 	if err := opLookPathFunc(); err != nil {
 		return nil, fmt.Errorf("config contains op:// references but 1Password CLI is not installed: %w", err)
 	}
+
+	// Extract optional account before resolving references.
+	account := extractOPAccount(raw)
 
 	// Deduplicate references.
 	unique := make(map[string]struct{})
@@ -77,7 +100,7 @@ func resolveOnePassword(raw []byte) ([]byte, error) {
 			continue
 		}
 
-		val, err := opRunnerFunc(ref)
+		val, err := opRunnerFunc(ref, account)
 		if err != nil {
 			errs = append(errs, err)
 			continue
