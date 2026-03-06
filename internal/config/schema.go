@@ -25,8 +25,28 @@ type Config struct {
 	// Security holds optional security settings for plugin certification.
 	Security *SecurityConfig `yaml:"security,omitempty"`
 
+	// Router holds optional router settings (e.g. group message policy).
+	Router *RouterConfig `yaml:"router,omitempty"`
+
 	// OnePassword holds 1Password CLI settings for op:// secret resolution.
 	OnePassword *OnePasswordConfig `yaml:"onepassword,omitempty"`
+}
+
+// RouterConfig holds router-level settings.
+type RouterConfig struct {
+	GroupPolicy GroupPolicyConfig `yaml:"group_policy,omitempty"`
+}
+
+// GroupPolicyConfig controls how group messages are handled.
+type GroupPolicyConfig struct {
+	// Mode is the group policy mode: "require_mention" or "allow_all".
+	Mode string `yaml:"mode"`
+
+	// Allowlist is a list of sender IDs that are always processed in groups.
+	Allowlist []string `yaml:"allowlist,omitempty"`
+
+	// Denylist is a list of sender IDs that are always blocked in groups.
+	Denylist []string `yaml:"denylist,omitempty"`
 }
 
 // OnePasswordConfig holds 1Password CLI settings.

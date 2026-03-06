@@ -39,6 +39,7 @@ func Validate(cfg *Config) error {
 
 	errs = append(errs, validatePlugins(cfg.Plugins)...)
 	errs = append(errs, validateSecurity(cfg.Security)...)
+	errs = append(errs, validateRouter(cfg.Router)...)
 
 	// Agent validation (skip entirely if no agents defined — backward compatible).
 	if len(cfg.Agents) > 0 {
@@ -79,6 +80,23 @@ func validateSecurity(sec *SecurityConfig) []error {
 		}
 	}
 
+	return errs
+}
+
+func validateRouter(r *RouterConfig) []error {
+	if r == nil {
+		return nil
+	}
+	var errs []error
+	switch r.GroupPolicy.Mode {
+	case "", "require_mention", "allow_all":
+		// valid
+	default:
+		errs = append(errs, fmt.Errorf(
+			"config: router.group_policy.mode: unsupported value %q (supported: \"require_mention\", \"allow_all\")",
+			r.GroupPolicy.Mode,
+		))
+	}
 	return errs
 }
 

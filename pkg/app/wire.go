@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/channel"
+	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/cron"
 	"github.com/flemzord/sclaw/internal/memory"
@@ -97,6 +98,7 @@ func wireRouter(
 	logger *slog.Logger,
 	auditLogger *security.AuditLogger,
 	rateLimiter *security.RateLimiter,
+	routerCfg *config.RouterConfig,
 ) error {
 	// Discover channels and providers from loaded modules.
 	dispatcher := channel.NewDispatcher()
@@ -256,12 +258,23 @@ func wireRouter(
 	})
 	factory.SetSubAgentManager(subMgr)
 
+	// Build group policy from config.
+	var groupPolicy router.GroupPolicy
+	if routerCfg != nil {
+		groupPolicy = router.GroupPolicy{
+			Mode:      router.GroupPolicyMode(routerCfg.GroupPolicy.Mode),
+			Allowlist: routerCfg.GroupPolicy.Allowlist,
+			Denylist:  routerCfg.GroupPolicy.Denylist,
+		}
+	}
+
 	// Create the router.
 	r, err := router.NewRouter(router.Config{
 		AgentFactory:    factory,
 		ResponseSender:  dispatcher,
 		ChannelLookup:   dispatcher,
 		StreamSender:    dispatcher,
+		GroupPolicy:     groupPolicy,
 		Logger:          logger,
 		RateLimiter:     rateLimiter,
 		HistoryResolver: factory,

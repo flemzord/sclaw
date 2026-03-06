@@ -273,6 +273,52 @@ provider: `+providerID+`
 	}
 }
 
+func TestValidate_RouterGroupPolicyValid(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+
+	for _, mode := range []string{"require_mention", "allow_all", ""} {
+		cfg := &Config{
+			Version: "1",
+			Modules: map[string]yaml.Node{id: {}},
+			Router:  &RouterConfig{GroupPolicy: GroupPolicyConfig{Mode: mode}},
+		}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("mode %q: unexpected error: %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_RouterGroupPolicyInvalidMode(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{id: {}},
+		Router:  &RouterConfig{GroupPolicy: GroupPolicyConfig{Mode: "bad_mode"}},
+	}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid group_policy mode")
+	}
+	if !strings.Contains(err.Error(), "bad_mode") {
+		t.Errorf("error should mention the invalid mode: %v", err)
+	}
+}
+
+func TestValidate_RouterNil(t *testing.T) {
+	id := t.Name() + ".mod"
+	registerStub(t, id)
+	cfg := &Config{
+		Version: "1",
+		Modules: map[string]yaml.Node{id: {}},
+		Router:  nil,
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_AgentsWithMemoryAndDataDir(t *testing.T) {
 	modID := t.Name() + ".mod"
 	providerID := t.Name() + ".provider"

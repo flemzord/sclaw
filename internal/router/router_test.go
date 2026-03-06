@@ -123,6 +123,29 @@ func TestNewRouter_Defaults(t *testing.T) {
 	if r.config.Logger == nil {
 		t.Error("Logger should not be nil after defaults")
 	}
+	if r.config.GroupPolicy.Mode != GroupPolicyRequireMention {
+		t.Errorf("GroupPolicy.Mode = %q, want %q", r.config.GroupPolicy.Mode, GroupPolicyRequireMention)
+	}
+}
+
+func TestNewRouter_GroupPolicyPreserved(t *testing.T) {
+	t.Parallel()
+
+	r, err := NewRouter(Config{
+		AgentFactory:   &noopAgentFactory{},
+		ResponseSender: &noopResponseSender{},
+		GroupPolicy:    GroupPolicy{Mode: GroupPolicyAllowAll, Allowlist: []string{"U1"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if r.config.GroupPolicy.Mode != GroupPolicyAllowAll {
+		t.Errorf("GroupPolicy.Mode = %q, want %q", r.config.GroupPolicy.Mode, GroupPolicyAllowAll)
+	}
+	if len(r.config.GroupPolicy.Allowlist) != 1 || r.config.GroupPolicy.Allowlist[0] != "U1" {
+		t.Errorf("GroupPolicy.Allowlist = %v, want [U1]", r.config.GroupPolicy.Allowlist)
+	}
 }
 
 func TestRouter_Submit_NonBlocking(t *testing.T) {

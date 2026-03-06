@@ -153,7 +153,7 @@ func Run(params RunParams) error {
 	// Wire the router between LoadModules and Start: discover channels and
 	// providers, create the dispatcher and agent factory, call SetInbox on
 	// every channel, and append the router to the app lifecycle.
-	if err := wireRouter(application, appCtx, ids, logger, auditLogger, rateLimiter); err != nil {
+	if err := wireRouter(application, appCtx, ids, logger, auditLogger, rateLimiter, cfg.Router); err != nil {
 		return err
 	}
 

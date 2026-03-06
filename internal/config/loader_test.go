@@ -185,6 +185,50 @@ modules:
 	}
 }
 
+func TestLoadFromBytes_RouterGroupPolicy(t *testing.T) {
+	content := `version: "1"
+router:
+  group_policy:
+    mode: "allow_all"
+    allowlist: ["U001", "U002"]
+    denylist: ["U999"]
+modules:
+  test.mod:
+    key: value
+`
+	cfg, err := LoadFromBytes([]byte(content))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Router == nil {
+		t.Fatal("expected Router to be non-nil")
+	}
+	if cfg.Router.GroupPolicy.Mode != "allow_all" {
+		t.Errorf("mode = %q, want %q", cfg.Router.GroupPolicy.Mode, "allow_all")
+	}
+	if len(cfg.Router.GroupPolicy.Allowlist) != 2 {
+		t.Errorf("allowlist len = %d, want 2", len(cfg.Router.GroupPolicy.Allowlist))
+	}
+	if len(cfg.Router.GroupPolicy.Denylist) != 1 {
+		t.Errorf("denylist len = %d, want 1", len(cfg.Router.GroupPolicy.Denylist))
+	}
+}
+
+func TestLoadFromBytes_RouterAbsent(t *testing.T) {
+	content := `version: "1"
+modules:
+  test.mod:
+    key: value
+`
+	cfg, err := LoadFromBytes([]byte(content))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Router != nil {
+		t.Error("expected Router to be nil when absent from config")
+	}
+}
+
 func TestLoad_WithEnvExpansion(t *testing.T) {
 	t.Setenv("SCLAW_TEST_KEY", "expanded_value")
 	dir := t.TempDir()

@@ -70,6 +70,9 @@ func (c Config) withDefaults() Config {
 	if c.MaxIdle <= 0 {
 		c.MaxIdle = defaultMaxIdle
 	}
+	if c.GroupPolicy.Mode == "" {
+		c.GroupPolicy.Mode = GroupPolicyRequireMention
+	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
