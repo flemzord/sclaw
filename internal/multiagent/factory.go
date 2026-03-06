@@ -383,10 +383,16 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 		AvailableTools: toolNames,
 	})
 
+	activeNames := make([]string, len(active))
+	for i, s := range active {
+		activeNames[i] = s.Meta.Name
+	}
+
 	logger.Debug("skills activation complete",
 		"agent_id", agentID,
 		"loaded", len(allSkills),
 		"active", len(active),
+		"active_names", activeNames,
 	)
 
 	return workspace.FormatSkillsForPrompt(active), nil
