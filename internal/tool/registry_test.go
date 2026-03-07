@@ -475,3 +475,51 @@ func TestTruncateForAudit_ShortString(t *testing.T) {
 		t.Errorf("truncateForAudit(%q) = %q, want unchanged", s, got)
 	}
 }
+
+func TestRegistryClone_Independent(t *testing.T) {
+	t.Parallel()
+
+	r := NewRegistry()
+	if err := r.Register(registryTestTool{name: "read_file", scopes: []Scope{ScopeReadOnly}}); err != nil {
+		t.Fatalf("register error: %v", err)
+	}
+
+	cloned := r.Clone()
+
+	// Clone has the same tool.
+	if _, err := cloned.Get("read_file"); err != nil {
+		t.Fatalf("cloned missing read_file: %v", err)
+	}
+
+	// Adding to clone does not affect original.
+	if err := cloned.Register(registryTestTool{name: "write_file", scopes: []Scope{ScopeReadWrite}}); err != nil {
+		t.Fatalf("register on clone error: %v", err)
+	}
+
+	if _, err := r.Get("write_file"); err == nil {
+		t.Fatal("write_file should not exist in original after registering on clone")
+	}
+
+	// Original still has only 1 tool.
+	names := r.Names()
+	if len(names) != 1 {
+		t.Fatalf("original has %d tools, want 1", len(names))
+	}
+
+	// Clone has 2 tools.
+	clonedNames := cloned.Names()
+	if len(clonedNames) != 2 {
+		t.Fatalf("clone has %d tools, want 2", len(clonedNames))
+	}
+}
+
+func TestRegistryClone_EmptyRegistry(t *testing.T) {
+	t.Parallel()
+
+	r := NewRegistry()
+	cloned := r.Clone()
+
+	if len(cloned.Names()) != 0 {
+		t.Fatal("cloned empty registry should have 0 tools")
+	}
+}

@@ -1,6 +1,7 @@
 package multiagent
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/flemzord/sclaw/internal/agent"
+	"github.com/flemzord/sclaw/internal/mcp"
 	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
@@ -66,6 +68,7 @@ type Factory struct {
 	registry atomic.Pointer[Registry]
 
 	subAgentMgr *subagent.Manager
+	mcpResolver *mcp.Resolver
 
 	mu         sync.RWMutex
 	stores     map[string]memory.HistoryStore
@@ -84,11 +87,16 @@ var (
 
 // NewFactory creates a Factory from the given configuration.
 func NewFactory(cfg FactoryConfig) *Factory {
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	f := &Factory{
-		cfg:        cfg,
-		stores:     make(map[string]memory.HistoryStore),
-		factStores: make(map[string]memory.Store),
-		souls:      make(map[string]workspace.SoulProvider),
+		cfg:         cfg,
+		mcpResolver: mcp.NewResolver(logger),
+		stores:      make(map[string]memory.HistoryStore),
+		factStores:  make(map[string]memory.Store),
+		souls:       make(map[string]workspace.SoulProvider),
 	}
 	f.registry.Store(cfg.Registry)
 	return f
@@ -143,6 +151,21 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 
 	// Build tool registry (filtered or global).
 	toolReg := f.buildToolRegistry(agentCfg)
+
+	// Inject per-agent MCP tools from mcp.json.
+	mcpTools := f.mcpResolver.ResolveTools(context.Background(), agentID, agentCfg.DataDir)
+	if len(mcpTools) > 0 {
+		// Clone if we got the shared global registry to avoid mutating it.
+		if toolReg == f.cfg.GlobalTools {
+			toolReg = f.cfg.GlobalTools.Clone()
+		}
+		for _, t := range mcpTools {
+			if len(agentCfg.Tools) > 0 && !slices.Contains(agentCfg.Tools, t.Name()) {
+				continue
+			}
+			_ = toolReg.Register(t)
+		}
+	}
 
 	// Register sub-agent tools so the session can spawn/manage sub-agents.
 	// Skip if already registered (ForSession is called per-message and the
@@ -431,6 +454,20 @@ func (f *Factory) ForCronJob(agentID string, toolFilter []string, loopOverrides 
 	// Build tool registry filtered by agent allowlist.
 	toolReg := f.buildToolRegistry(agentCfg)
 
+	// Inject per-agent MCP tools from mcp.json.
+	mcpTools := f.mcpResolver.ResolveTools(context.Background(), agentID, agentCfg.DataDir)
+	if len(mcpTools) > 0 {
+		if toolReg == f.cfg.GlobalTools {
+			toolReg = f.cfg.GlobalTools.Clone()
+		}
+		for _, t := range mcpTools {
+			if len(agentCfg.Tools) > 0 && !slices.Contains(agentCfg.Tools, t.Name()) {
+				continue
+			}
+			_ = toolReg.Register(t)
+		}
+	}
+
 	// Apply additional cron-specific tool filter (intersection).
 	if len(toolFilter) > 0 {
 		filtered := tool.NewRegistry()
@@ -506,6 +543,16 @@ func (f *Factory) BuildCronLoop(agentID string, toolFilter []string, loopOverrid
 func (f *Factory) Reload(newRegistry *Registry) {
 	old := f.registry.Swap(newRegistry)
 
+	// Invalidate MCP clients for deleted agents or agents whose DataDir changed.
+	// Done before acquiring f.mu since mcpResolver has its own lock.
+	for _, agentID := range old.AgentIDs() {
+		oldCfg, oldOK := old.AgentConfig(agentID)
+		newCfg, newOK := newRegistry.AgentConfig(agentID)
+		if !newOK || (oldOK && oldCfg.DataDir != newCfg.DataDir) {
+			f.mcpResolver.InvalidateAgent(agentID)
+		}
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -549,12 +596,18 @@ func (f *Factory) Reload(newRegistry *Registry) {
 	}
 }
 
-// Close closes all SQLite databases opened by ResolveHistory.
+// Close closes all MCP clients and SQLite databases.
 func (f *Factory) Close() error {
+	// Close MCP resolver first (has its own lock).
+	mcpErr := f.mcpResolver.Close()
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	var firstErr error
+	if mcpErr != nil {
+		firstErr = mcpErr
+	}
 	for _, db := range f.dbs {
 		if err := db.Close(); err != nil && firstErr == nil {
 			firstErr = err

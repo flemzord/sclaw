@@ -125,6 +125,24 @@ func (r *Registry) ToolDefinitions() []provider.ToolDefinition {
 	return defs
 }
 
+// Clone returns a shallow copy of the registry with the same tools, audit logger,
+// and rate limiter. The returned registry is independent — registering new tools
+// on the clone does not affect the original.
+func (r *Registry) Clone() *Registry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	cloned := &Registry{
+		tools:       make(map[string]Tool, len(r.tools)),
+		auditLogger: r.auditLogger,
+		rateLimiter: r.rateLimiter,
+	}
+	for name, t := range r.tools {
+		cloned.tools[name] = t
+	}
+	return cloned
+}
+
 // Names returns all registered tool names sorted alphabetically.
 func (r *Registry) Names() []string {
 	r.mu.RLock()
