@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 
 	"github.com/kardianos/service"
@@ -80,11 +81,20 @@ func ServiceConfig(cfgPath string, system bool) *service.Config {
 	if cfgPath != "" {
 		args = append(args, "--config", cfgPath)
 	}
+	// Use the config file's directory as WorkingDirectory so that relative
+	// paths in the config (e.g. agents/main) resolve correctly. Without this,
+	// launchd defaults to / which is read-only on macOS.
+	var workDir string
+	if cfgPath != "" {
+		workDir = filepath.Dir(cfgPath)
+	}
+
 	cfg := &service.Config{
-		Name:        "sclaw",
-		DisplayName: "sclaw",
-		Description: "A plugin-first, self-hosted personal AI assistant",
-		Arguments:   args,
+		Name:             "sclaw",
+		DisplayName:      "sclaw",
+		Description:      "A plugin-first, self-hosted personal AI assistant",
+		Arguments:        args,
+		WorkingDirectory: workDir,
 	}
 	if !system {
 		cfg.Option = service.KeyValue{
