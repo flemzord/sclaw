@@ -45,6 +45,7 @@
             "pages": [
               "configuration/overview",
               "configuration/cli",
+              "configuration/daemon",
               "configuration/modules",
               "configuration/agents",
               "configuration/security",

@@ -49,6 +49,15 @@ type RunParams struct {
 // signal is received. SIGHUP and file-change events trigger a live
 // configuration reload for modules that implement core.Reloader.
 func Run(params RunParams) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	return RunWithContext(ctx, params)
+}
+
+// RunWithContext is like Run but accepts an external context for shutdown.
+// When ctx is cancelled, the application shuts down gracefully. SIGHUP is
+// still handled for live configuration reload.
+func RunWithContext(ctx context.Context, params RunParams) error {
 	cfgPath := params.ConfigPath
 	if cfgPath == "" {
 		resolved, err := ResolveConfigPath()
@@ -178,16 +187,16 @@ func Run(params RunParams) error {
 	// and make it available for tool execution via service lookup.
 	appCtx.RegisterService("security.sanitized_env", security.SanitizedEnv(credStore))
 
-	// --- signal handling ---
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
+	// --- SIGHUP handling for reload (independent of shutdown context) ---
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	defer signal.Stop(sighupCh)
 
 	// --- file watcher ---
 	watcher := reload.NewWatcher(reload.WatcherConfig{
 		ConfigPath: cfgPath,
 	})
-	watchCtx, watchCancel := context.WithCancel(context.Background())
+	watchCtx, watchCancel := context.WithCancel(ctx)
 	defer watchCancel()
 	watcher.Start(watchCtx)
 	defer watcher.Stop()
@@ -205,18 +214,15 @@ func Run(params RunParams) error {
 	// --- main event loop ---
 	for {
 		select {
-		case sig := <-sigCh:
-			switch sig {
-			case syscall.SIGHUP:
-				logger.Info("SIGHUP received, reloading configuration")
-				if err := reloadOrRebuild(watchCtx, logger, handler, bs, application, cfgPath); err != nil {
-					logger.Error("reload failed", "error", err)
-				}
-			default:
-				logger.Info("shutdown signal received", "signal", sig.String())
-				application.Stop()
-				logger.Info("shutdown complete")
-				return nil
+		case <-ctx.Done():
+			logger.Info("shutdown requested")
+			application.Stop()
+			logger.Info("shutdown complete")
+			return nil
+		case <-sighupCh:
+			logger.Info("SIGHUP received, reloading configuration")
+			if err := reloadOrRebuild(watchCtx, logger, handler, bs, application, cfgPath); err != nil {
+				logger.Error("reload failed", "error", err)
 			}
 		case evt := <-watcher.Events():
 			logger.Info("config file changed, reloading", "path", evt.ConfigPath)

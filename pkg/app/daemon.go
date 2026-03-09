@@ -1,0 +1,85 @@
+// Package app provides the shared entry point for sclaw and xsclaw binaries.
+package app
+
+import (
+	"context"
+	"sync"
+
+	"github.com/kardianos/service"
+)
+
+// Daemon wraps the sclaw application as a system service.
+// It implements the service.Interface required by kardianos/service.
+type Daemon struct {
+	params RunParams
+	logger service.Logger
+
+	mu     sync.Mutex
+	cancel context.CancelFunc
+	done   chan error
+}
+
+// NewDaemon creates a Daemon that will run sclaw with the given params.
+func NewDaemon(params RunParams) *Daemon {
+	return &Daemon{
+		params: params,
+	}
+}
+
+// Start is called by the service manager to start the daemon.
+// It must not block — the application runs in a background goroutine.
+func (d *Daemon) Start(s service.Service) error {
+	logger, err := s.Logger(nil)
+	if err != nil {
+		return err
+	}
+	d.logger = logger
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	d.mu.Lock()
+	d.cancel = cancel
+	d.done = make(chan error, 1)
+	d.mu.Unlock()
+
+	go func() {
+		d.done <- RunWithContext(ctx, d.params)
+	}()
+
+	_ = logger.Info("sclaw service started")
+	return nil
+}
+
+// Stop is called by the service manager to stop the daemon.
+func (d *Daemon) Stop(_ service.Service) error {
+	d.mu.Lock()
+	cancel := d.cancel
+	done := d.done
+	d.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		if err := <-done; err != nil {
+			_ = d.logger.Error(err)
+		}
+	}
+
+	_ = d.logger.Info("sclaw service stopped")
+	return nil
+}
+
+// ServiceConfig returns the default service configuration for sclaw.
+func ServiceConfig(cfgPath string) *service.Config {
+	args := []string{"start"}
+	if cfgPath != "" {
+		args = append(args, "--config", cfgPath)
+	}
+	return &service.Config{
+		Name:        "sclaw",
+		DisplayName: "sclaw",
+		Description: "A plugin-first, self-hosted personal AI assistant",
+		Arguments:   args,
+	}
+}

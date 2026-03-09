@@ -71,6 +71,24 @@ If no path is provided, the file is auto-discovered using the same logic as `scl
 
 ---
 
+### `sclaw service`
+
+Manage sclaw as a system service (daemon). See the [Daemon Mode](/configuration/daemon) guide for full details.
+
+```bash
+sclaw service install [--config path]   # Install as a system service
+sclaw service uninstall                 # Remove the service
+sclaw service start                     # Start the daemon
+sclaw service stop                      # Stop the daemon
+sclaw service status                    # Show service status
+```
+
+| Flag | Description |
+|------|-------------|
+| `-c`, `--config` | Path to configuration file (baked into the service definition) |
+
+---
+
 ### `sclaw version`
 
 Print version, build info, and compiled modules.

@@ -1,0 +1,121 @@
+---
+title: Daemon Mode
+description: "Run sclaw as a system service"
+icon: "server"
+---
+
+sclaw can run as a system service (daemon) managed by your operating system's service manager. This uses [kardianos/service](https://github.com/kardianos/service) to provide cross-platform support.
+
+## Supported Platforms
+
+| Platform | Service Manager |
+|----------|----------------|
+| Linux | systemd, Upstart, SysV |
+| macOS | launchd |
+| Windows | Windows Service |
+
+## Commands
+
+### Install
+
+Register sclaw as a system service:
+
+```bash
+sclaw service install
+```
+
+With a specific configuration file:
+
+```bash
+sclaw service install --config /etc/sclaw/sclaw.yaml
+```
+
+### Start
+
+Start the service via the system service manager:
+
+```bash
+sclaw service start
+```
+
+### Stop
+
+Stop the running service:
+
+```bash
+sclaw service stop
+```
+
+### Status
+
+Check whether the service is running:
+
+```bash
+sclaw service status
+```
+
+### Uninstall
+
+Remove the service registration:
+
+```bash
+sclaw service uninstall
+```
+
+## How It Works
+
+When installed, the service manager is configured to run `sclaw start` with the provided flags. The service wrapper handles:
+
+- **Startup**: launches the full sclaw application in the background
+- **Shutdown**: gracefully stops all modules when the service manager requests it
+- **Hot reload**: `SIGHUP` and file-watcher reload continue to work as in interactive mode
+
+<Note>
+The `--config` flag passed to `sclaw service install` is baked into the service definition. If you move your config file, you need to uninstall and reinstall the service.
+</Note>
+
+## Typical Setup
+
+<Steps>
+
+### Install and configure
+
+```bash
+# Generate a config (or write one manually)
+sclaw init
+
+# Validate it
+sclaw config check
+```
+
+### Install as a service
+
+```bash
+sclaw service install --config ~/.config/sclaw/sclaw.yaml
+```
+
+### Start the daemon
+
+```bash
+sclaw service start
+```
+
+### Verify it's running
+
+```bash
+sclaw service status
+```
+
+</Steps>
+
+## Logs
+
+In daemon mode, logs go to the system log facility:
+
+- **Linux (systemd)**: `journalctl -u sclaw`
+- **macOS (launchd)**: `log show --predicate 'process == "sclaw"'`
+- **Windows**: Event Viewer
+
+<Info>
+When running interactively (`sclaw start`), logs still go to stderr as usual. The system logger is only used when running as a managed service.
+</Info>
