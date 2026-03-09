@@ -24,16 +24,18 @@ func (t *Telegram) SupportsStreaming() bool {
 }
 
 // SendStream delivers a stream of text chunks by editing a placeholder message.
-func (t *Telegram) SendStream(ctx context.Context, chat message.Chat, stream <-chan string) error {
-	chatID, err := strconv.ParseInt(chat.ID, 10, 64)
+func (t *Telegram) SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) error {
+	chatID, err := strconv.ParseInt(msg.Chat.ID, 10, 64)
 	if err != nil {
-		return errors.New("telegram: invalid chat ID: " + chat.ID)
+		return errors.New("telegram: invalid chat ID: " + msg.Chat.ID)
 	}
+	threadID := parseOptionalInt(msg.ThreadID, t.logger)
 
 	// Send initial placeholder message.
 	placeholder, err := t.client.SendMessage(ctx, SendMessageRequest{
-		ChatID: chatID,
-		Text:   streamPlaceholder,
+		ChatID:          chatID,
+		Text:            streamPlaceholder,
+		MessageThreadID: threadID,
 	})
 	if err != nil {
 		return err

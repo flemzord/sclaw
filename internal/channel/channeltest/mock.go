@@ -146,7 +146,7 @@ func (m *MockStreamingChannel) SupportsStreaming() bool {
 }
 
 // SendStream implements channel.StreamingChannel. It collects all chunks.
-func (m *MockStreamingChannel) SendStream(_ context.Context, _ message.Chat, stream <-chan string) error {
+func (m *MockStreamingChannel) SendStream(_ context.Context, _ message.OutboundMessage, stream <-chan string) error {
 	for chunk := range stream {
 		m.mu.Lock()
 		m.streamChunks = append(m.streamChunks, chunk)

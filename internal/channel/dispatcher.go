@@ -78,7 +78,7 @@ func (d *Dispatcher) SendStream(ctx context.Context, msg message.OutboundMessage
 		return false, nil
 	}
 
-	if err := sc.SendStream(ctx, msg.Chat, stream); err != nil {
+	if err := sc.SendStream(ctx, msg, stream); err != nil {
 		return false, err
 	}
 	return true, nil

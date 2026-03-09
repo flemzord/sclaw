@@ -74,8 +74,8 @@ func TestSendStream(t *testing.T) {
 	stream <- "World"
 	close(stream)
 
-	chat := message.Chat{ID: "100", Type: message.ChatDM}
-	err := tg.SendStream(context.Background(), chat, stream)
+	msg := message.OutboundMessage{Chat: message.Chat{ID: "100", Type: message.ChatDM}}
+	err := tg.SendStream(context.Background(), msg, stream)
 	if err != nil {
 		t.Fatalf("SendStream() error: %v", err)
 	}
@@ -151,8 +151,8 @@ func TestSendStreamFormatsMarkdownV2(t *testing.T) {
 	stream <- "Here is **bold** text"
 	close(stream)
 
-	chat := message.Chat{ID: "100", Type: message.ChatDM}
-	err := tg.SendStream(context.Background(), chat, stream)
+	msg := message.OutboundMessage{Chat: message.Chat{ID: "100", Type: message.ChatDM}}
+	err := tg.SendStream(context.Background(), msg, stream)
 	if err != nil {
 		t.Fatalf("SendStream() error: %v", err)
 	}
@@ -214,9 +214,9 @@ func TestSendStreamIgnoresNotModified(t *testing.T) {
 	stream <- "test"
 	close(stream)
 
-	chat := message.Chat{ID: "100", Type: message.ChatDM}
+	msg := message.OutboundMessage{Chat: message.Chat{ID: "100", Type: message.ChatDM}}
 	// Should not fail even though all edits return "not modified".
-	err := tg.SendStream(context.Background(), chat, stream)
+	err := tg.SendStream(context.Background(), msg, stream)
 	if err != nil {
 		t.Fatalf("SendStream() should not error on 'not modified': %v", err)
 	}

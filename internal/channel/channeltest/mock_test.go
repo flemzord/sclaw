@@ -183,7 +183,7 @@ func TestMockStreamingChannel_SendStream(t *testing.T) {
 	stream <- "!"
 	close(stream)
 
-	if err := ch.SendStream(context.Background(), message.Chat{}, stream); err != nil {
+	if err := ch.SendStream(context.Background(), message.OutboundMessage{}, stream); err != nil {
 		t.Fatalf("SendStream: %v", err)
 	}
 

@@ -263,14 +263,14 @@ func TestEndToEnd_StreamingChannel(t *testing.T) {
 		t.Fatal("mock streaming channel should support streaming")
 	}
 
-	chat := message.Chat{ID: "chat-1", Type: message.ChatDM}
+	msg := message.OutboundMessage{Chat: message.Chat{ID: "chat-1", Type: message.ChatDM}}
 	stream := make(chan string, 3)
 	stream <- "Hello "
 	stream <- "World"
 	stream <- "!"
 	close(stream)
 
-	if err := ch.SendStream(context.Background(), chat, stream); err != nil {
+	if err := ch.SendStream(context.Background(), msg, stream); err != nil {
 		t.Fatalf("SendStream: %v", err)
 	}
 

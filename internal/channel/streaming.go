@@ -21,7 +21,7 @@ type StreamingChannel interface {
 	// SendStream delivers a stream of text chunks to the platform.
 	// The channel should aggregate chunks and flush periodically.
 	// The stream is closed by the caller when the response is complete.
-	SendStream(ctx context.Context, chat message.Chat, stream <-chan string) error
+	SendStream(ctx context.Context, msg message.OutboundMessage, stream <-chan string) error
 }
 
 // TypingChannel is implemented by channels that can show typing indicators
