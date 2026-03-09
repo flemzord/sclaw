@@ -136,7 +136,7 @@ func TestResolveOnePassword_TwoSegmentError(t *testing.T) {
 }
 
 func TestResolveOnePassword_AccountPassedToRunner(t *testing.T) {
-	stubOP(t, func(ref, account string) (string, error) {
+	stubOP(t, func(_, account string) (string, error) {
 		if account != "MYACCOUNT123" {
 			t.Errorf("expected account MYACCOUNT123, got %q", account)
 		}

@@ -95,7 +95,7 @@ func formatResult(result *gomcp.CallToolResult) string {
 func buildSchema(t gomcp.Tool) json.RawMessage {
 	// Prefer raw schema if available.
 	if len(t.RawInputSchema) > 0 {
-		return json.RawMessage(t.RawInputSchema)
+		return t.RawInputSchema
 	}
 
 	// Fall back to the structured InputSchema.

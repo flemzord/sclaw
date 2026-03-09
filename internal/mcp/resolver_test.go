@@ -10,7 +10,7 @@ import (
 
 func TestResolver_NoMCPJSON(t *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	tools := r.ResolveTools(context.Background(), "agent1", t.TempDir())
 	if len(tools) != 0 {
@@ -20,7 +20,7 @@ func TestResolver_NoMCPJSON(t *testing.T) {
 
 func TestResolver_EmptyDataDir(t *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	tools := r.ResolveTools(context.Background(), "agent1", "")
 	if tools != nil {
@@ -30,7 +30,7 @@ func TestResolver_EmptyDataDir(t *testing.T) {
 
 func TestResolver_CachesNil(t *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	dir := t.TempDir()
 
@@ -55,7 +55,7 @@ func TestResolver_CachesNil(t *testing.T) {
 
 func TestResolver_InvalidateAgent(t *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	dir := t.TempDir()
 	r.ResolveTools(context.Background(), "agent1", dir)
@@ -79,9 +79,9 @@ func TestResolver_InvalidateAgent(t *testing.T) {
 	}
 }
 
-func TestResolver_InvalidateNonExistent(t *testing.T) {
+func TestResolver_InvalidateNonExistent(_ *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Should not panic.
 	r.InvalidateAgent("nonexistent")
@@ -109,7 +109,7 @@ func TestResolver_Close(t *testing.T) {
 
 func TestResolver_InvalidConfigSkipped(t *testing.T) {
 	r := NewResolver(slog.Default())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	dir := t.TempDir()
 	// Write invalid JSON.

@@ -84,14 +84,14 @@ func (c *Client) Connect(ctx context.Context) error {
 	initReq.Params.Capabilities = mcp.ClientCapabilities{}
 
 	if _, err := inner.Initialize(ctx, initReq); err != nil {
-		inner.Close()
+		_ = inner.Close()
 		return fmt.Errorf("mcp: initializing %q: %w", c.name, err)
 	}
 
 	// List available tools.
 	toolsResult, err := inner.ListTools(ctx, mcp.ListToolsRequest{})
 	if err != nil {
-		inner.Close()
+		_ = inner.Close()
 		return fmt.Errorf("mcp: listing tools for %q: %w", c.name, err)
 	}
 

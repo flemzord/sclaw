@@ -183,8 +183,11 @@ func TestLoadConfig_EnvExpansionWithDefault(t *testing.T) {
 	}
 
 	// Ensure the env var is NOT set so the default is used.
+	// t.Setenv registers cleanup to restore the original value.
 	t.Setenv("TEST_MCP_URL", "")
-	os.Unsetenv("TEST_MCP_URL")
+	if err := os.Unsetenv("TEST_MCP_URL"); err != nil { //nolint:tenv // must unset, not just empty
+		t.Fatal(err)
+	}
 
 	cfg, err := LoadConfig(dir)
 	if err != nil {

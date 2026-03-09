@@ -16,7 +16,7 @@ import (
 // Config represents the top-level mcp.json configuration.
 // The format is compatible with Claude Desktop's mcp.json.
 type Config struct {
-	Servers map[string]ServerConfig `json:"mcpServers"`
+	Servers map[string]ServerConfig `json:"mcpServers"` //nolint:tagliatelle // Claude Desktop format
 }
 
 // ServerConfig defines a single MCP server connection.

@@ -68,19 +68,6 @@ func (cm *connManager) getConn(ctx context.Context) (*websocket.Conn, error) {
 	return cm.conn, nil
 }
 
-// release marks the connection as no longer in use and closes it.
-// The next getConn call will dial a fresh connection.
-func (cm *connManager) release() {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	cm.inUse = false
-	if cm.conn != nil {
-		cm.conn.CloseNow() //nolint:errcheck // best-effort close
-		cm.conn = nil
-	}
-}
-
 // invalidate closes the current connection so a fresh one is dialed next time.
 func (cm *connManager) invalidate() {
 	cm.mu.Lock()
