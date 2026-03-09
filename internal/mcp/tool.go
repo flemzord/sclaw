@@ -49,10 +49,10 @@ func NewTool(serverName string, mt gomcp.Tool, client *Client) tool.Tool {
 	}
 }
 
-func (t *mcpTool) Name() string             { return t.namespacedName }
-func (t *mcpTool) Description() string       { return t.description }
-func (t *mcpTool) Schema() json.RawMessage   { return t.schema }
-func (t *mcpTool) Scopes() []tool.Scope      { return []tool.Scope{tool.ScopeNetwork} }
+func (t *mcpTool) Name() string                      { return t.namespacedName }
+func (t *mcpTool) Description() string               { return t.description }
+func (t *mcpTool) Schema() json.RawMessage           { return t.schema }
+func (t *mcpTool) Scopes() []tool.Scope              { return []tool.Scope{tool.ScopeNetwork} }
 func (t *mcpTool) DefaultPolicy() tool.ApprovalLevel { return tool.ApprovalAllow }
 
 // Execute calls the MCP tool and formats the result as tool.Output.

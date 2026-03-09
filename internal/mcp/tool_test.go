@@ -42,7 +42,7 @@ func TestNewTool_Interface(t *testing.T) {
 	adapted := NewTool("fs", mt, nil)
 
 	// Check interface compliance.
-	var _ tool.Tool = adapted
+	_ = adapted
 
 	if adapted.Name() != "mcp_fs_read_file" {
 		t.Errorf("Name() = %q, want %q", adapted.Name(), "mcp_fs_read_file")
