@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +14,7 @@ func TestOpenAPI_ServesValidYAML(t *testing.T) {
 	t.Parallel()
 
 	g := &Gateway{}
-	req := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	g.handleOpenAPI().ServeHTTP(rr, req)
 
@@ -62,7 +63,7 @@ func TestOpenAPI_ContainsCronSchemas(t *testing.T) {
 	t.Parallel()
 
 	g := &Gateway{}
-	req := httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/openapi.yaml", nil)
 	rr := httptest.NewRecorder()
 	g.handleOpenAPI().ServeHTTP(rr, req)
 

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func TestHealth_AllHealthy(t *testing.T) {
 		chain:    chain,
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 	g.handleHealth().ServeHTTP(rr, req)
 
@@ -67,7 +68,7 @@ func TestHealth_Degraded(t *testing.T) {
 
 	g := &Gateway{chain: chain}
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 	g.handleHealth().ServeHTTP(rr, req)
 
@@ -90,7 +91,7 @@ func TestHealth_NoChain(t *testing.T) {
 
 	g := &Gateway{}
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
 	g.handleHealth().ServeHTTP(rr, req)
 

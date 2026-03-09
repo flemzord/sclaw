@@ -55,7 +55,7 @@ func TestWebhookDispatcher_RegisteredSource_ValidHMAC(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
 	req.Header.Set("X-Signature-256", sig)
 	rr := httptest.NewRecorder()
 
@@ -84,7 +84,7 @@ func TestWebhookDispatcher_UnregisteredSource(t *testing.T) {
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
 	body := []byte(`{"data":"test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/unknown", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/webhooks/unknown", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
 	r.ServeHTTP(rr, req)
@@ -105,7 +105,7 @@ func TestWebhookDispatcher_InvalidHMAC(t *testing.T) {
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
 	body := []byte(`{"data":"test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
 	req.Header.Set("X-Signature-256", "sha256=invalid")
 	rr := httptest.NewRecorder()
 
@@ -127,7 +127,7 @@ func TestWebhookDispatcher_WrongMethod(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
-	req := httptest.NewRequest(http.MethodGet, "/webhooks/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/webhooks/test", nil)
 	rr := httptest.NewRecorder()
 
 	r.ServeHTTP(rr, req)
@@ -149,7 +149,7 @@ func TestWebhookDispatcher_NoSecretConfigured(t *testing.T) {
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
 	body := []byte(`{"data":"test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/open", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/webhooks/open", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
 	r.ServeHTTP(rr, req)
@@ -173,7 +173,7 @@ func TestWebhookDispatcher_HandlerError(t *testing.T) {
 	r.Post("/webhooks/{source}", d.ServeHTTP)
 
 	body := []byte(`{"data":"test"}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/failing", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/webhooks/failing", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 
 	r.ServeHTTP(rr, req)

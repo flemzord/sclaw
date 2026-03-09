@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,7 @@ func TestAuthMiddleware_ValidBearerToken(t *testing.T) {
 	cfg := AuthConfig{BearerToken: "secret-token"}
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
 	rr := httptest.NewRecorder()
 
@@ -36,7 +37,7 @@ func TestAuthMiddleware_InvalidBearerToken(t *testing.T) {
 	cfg := AuthConfig{BearerToken: "secret-token"}
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rr := httptest.NewRecorder()
 
@@ -53,7 +54,7 @@ func TestAuthMiddleware_ValidBasicAuth(t *testing.T) {
 	cfg := AuthConfig{BasicUser: "admin", BasicPass: "pass123"}
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.SetBasicAuth("admin", "pass123")
 	rr := httptest.NewRecorder()
 
@@ -70,7 +71,7 @@ func TestAuthMiddleware_InvalidBasicAuth(t *testing.T) {
 	cfg := AuthConfig{BasicUser: "admin", BasicPass: "pass123"}
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.SetBasicAuth("admin", "wrongpass")
 	rr := httptest.NewRecorder()
 
@@ -87,7 +88,7 @@ func TestAuthMiddleware_NoAuthHeader(t *testing.T) {
 	cfg := AuthConfig{BearerToken: "token"}
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
@@ -108,7 +109,7 @@ func TestAuthMiddleware_BearerPreferredOverBasic(t *testing.T) {
 	handler := authMiddleware(cfg, nil, nil)(okHandler())
 
 	// Bearer should work
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req.Header.Set("Authorization", "Bearer my-token")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -117,7 +118,7 @@ func TestAuthMiddleware_BearerPreferredOverBasic(t *testing.T) {
 	}
 
 	// Basic should also work
-	req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
 	req2.SetBasicAuth("admin", "pass")
 	rr2 := httptest.NewRecorder()
 	handler.ServeHTTP(rr2, req2)

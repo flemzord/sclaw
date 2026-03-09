@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -34,7 +35,7 @@ func TestStatus_ReturnsMetrics(t *testing.T) {
 		startedAt: time.Now().Add(-5 * time.Minute),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/status", nil)
 	rr := httptest.NewRecorder()
 	g.handleStatus().ServeHTTP(rr, req)
 

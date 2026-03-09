@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,7 @@ func TestCron_ListCrons_NilTrigger(t *testing.T) {
 	t.Parallel()
 
 	g := &Gateway{}
-	req := httptest.NewRequest(http.MethodGet, "/api/crons", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/crons", nil)
 	rr := httptest.NewRecorder()
 	g.handleListCrons().ServeHTTP(rr, req)
 
@@ -43,7 +44,7 @@ func TestCron_ListCrons_WithData(t *testing.T) {
 	})
 
 	g := &Gateway{cronTrigger: ct}
-	req := httptest.NewRequest(http.MethodGet, "/api/crons", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/crons", nil)
 	rr := httptest.NewRecorder()
 	g.handleListCrons().ServeHTTP(rr, req)
 
@@ -78,7 +79,7 @@ func TestCron_GetCron_Found(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/api/crons/{name}", g.handleGetCron())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/crons/my-cron", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/crons/my-cron", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -107,7 +108,7 @@ func TestCron_GetCron_NotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/api/crons/{name}", g.handleGetCron())
 
-	req := httptest.NewRequest(http.MethodGet, "/api/crons/nonexistent", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/crons/nonexistent", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -128,7 +129,7 @@ func TestCron_TriggerCron_NotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/crons/{name}/trigger", g.handleTriggerCron())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/crons/nonexistent/trigger", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/crons/nonexistent/trigger", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -156,7 +157,7 @@ func TestCron_TriggerCron_Accepted(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/crons/{name}/trigger", g.handleTriggerCron())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/crons/fire-me/trigger", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/crons/fire-me/trigger", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -184,7 +185,7 @@ func TestCron_TriggerCron_NilTrigger(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/crons/{name}/trigger", g.handleTriggerCron())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/crons/anything/trigger", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/crons/anything/trigger", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 

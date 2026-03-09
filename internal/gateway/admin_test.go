@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ func TestAdmin_ListSessions_Empty(t *testing.T) {
 		sessions: router.NewInMemorySessionStore(),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/sessions", nil)
 	rr := httptest.NewRecorder()
 	g.handleListSessions().ServeHTTP(rr, req)
 
@@ -44,7 +45,7 @@ func TestAdmin_ListSessions_WithData(t *testing.T) {
 
 	g := &Gateway{sessions: store}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/sessions", nil)
 	rr := httptest.NewRecorder()
 	g.handleListSessions().ServeHTTP(rr, req)
 
@@ -66,7 +67,7 @@ func TestAdmin_ListSessions_NilStore(t *testing.T) {
 
 	g := &Gateway{}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/sessions", nil)
 	rr := httptest.NewRecorder()
 	g.handleListSessions().ServeHTTP(rr, req)
 
@@ -96,7 +97,7 @@ func TestAdmin_DeleteSession_Found(t *testing.T) {
 	r := chi.NewRouter()
 	r.Delete("/api/sessions/{id}", g.handleDeleteSession())
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/"+id, nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/sessions/"+id, nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
@@ -117,7 +118,7 @@ func TestAdmin_DeleteSession_NotFound(t *testing.T) {
 	r := chi.NewRouter()
 	r.Delete("/api/sessions/{id}", g.handleDeleteSession())
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/sessions/nonexistent", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/sessions/nonexistent", nil)
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)
 
