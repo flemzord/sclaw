@@ -71,15 +71,25 @@ func (d *Daemon) Stop(_ service.Service) error {
 }
 
 // ServiceConfig returns the default service configuration for sclaw.
-func ServiceConfig(cfgPath string) *service.Config {
+// When system is false (default), the service is installed as a user-level
+// service (LaunchAgent on macOS, user systemd on Linux). When true, it is
+// installed as a system-level daemon (LaunchDaemon / system systemd) which
+// typically requires root privileges.
+func ServiceConfig(cfgPath string, system bool) *service.Config {
 	args := []string{"start"}
 	if cfgPath != "" {
 		args = append(args, "--config", cfgPath)
 	}
-	return &service.Config{
+	cfg := &service.Config{
 		Name:        "sclaw",
 		DisplayName: "sclaw",
 		Description: "A plugin-first, self-hosted personal AI assistant",
 		Arguments:   args,
 	}
+	if !system {
+		cfg.Option = service.KeyValue{
+			"UserService": true,
+		}
+	}
+	return cfg
 }

@@ -14,25 +14,37 @@ sclaw can run as a system service (daemon) managed by your operating system's se
 | macOS | launchd |
 | Windows | Windows Service |
 
+## User vs System Service
+
+By default, sclaw installs as a **user-level service** (LaunchAgent on macOS, user systemd on Linux). This does not require root and runs under your user account.
+
+To install as a **system-level service** (LaunchDaemon / system systemd), add `--system`:
+
+```bash
+sudo sclaw service install --system --config /etc/sclaw/sclaw.yaml
+```
+
+<Warning>
+The `--system` flag must be consistent across all `service` subcommands. If you installed with `--system`, you must also use `--system` for start, stop, status, and uninstall.
+</Warning>
+
 ## Commands
 
 ### Install
 
-Register sclaw as a system service:
+Register sclaw as a service:
 
 ```bash
-sclaw service install
-```
+# User-level (default, no root needed)
+sclaw service install --config ~/.config/sclaw/sclaw.yaml
 
-With a specific configuration file:
-
-```bash
-sclaw service install --config /etc/sclaw/sclaw.yaml
+# System-level (requires root)
+sudo sclaw service install --system --config /etc/sclaw/sclaw.yaml
 ```
 
 ### Start
 
-Start the service via the system service manager:
+Start the service via the service manager:
 
 ```bash
 sclaw service start
