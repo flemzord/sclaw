@@ -540,6 +540,9 @@ func wireCron(
 		}
 	}
 
+	// Create a CronTrigger so the gateway can list and fire prompt crons.
+	cronTrigger := cron.NewTrigger()
+
 	if registry != nil {
 		// Per-agent jobs: one set of jobs per registered agent.
 		for _, agentID := range registry.AgentIDs() {
@@ -593,16 +596,19 @@ func wireCron(
 					logger.Error("cron: invalid prompt cron", "agent", agentID, "error", e)
 				}
 				for _, def := range defs {
-					if err := s.RegisterJob(&cron.PromptJob{
+					job := &cron.PromptJob{
 						Def:     def,
 						AgentID: agentID,
 						Builder: loopBuilder,
 						Sender:  outputSender,
 						DataDir: cfg.DataDir,
 						Logger:  logger,
-					}); err != nil {
+					}
+					if err := s.RegisterJob(job); err != nil {
 						logger.Error("cron: registering prompt cron",
 							"agent", agentID, "cron", def.Name, "error", err)
+					} else {
+						cronTrigger.Register(job)
 					}
 				}
 			}
@@ -640,6 +646,9 @@ func wireCron(
 			return fmt.Errorf("cron: registering memory compaction: %w", err)
 		}
 	}
+
+	// Register CronTrigger as a service for the gateway to discover.
+	appCtx.RegisterService("cron.trigger", cronTrigger)
 
 	app.AppendModule("cron", &schedulerModule{
 		scheduler:    s,

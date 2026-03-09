@@ -1,0 +1,220 @@
+---
+title: Gateway API
+description: "HTTP gateway for administration, monitoring, cron management, and webhooks"
+icon: "server"
+---
+
+The gateway module (`gateway.http`) exposes an HTTP server for administration, monitoring, and webhooks. It binds to loopback by default and requires authentication for admin endpoints.
+
+## Configuration
+
+Add the `gateway.http` module to your config:
+
+```yaml
+modules:
+  gateway.http:
+    bind: "127.0.0.1:8080"
+    auth:
+      bearer_token: "your-secret-token"
+      # or basic auth:
+      # basic_user: "admin"
+      # basic_pass: "your-password"
+    read_timeout: 10s
+    write_timeout: 30s
+    shutdown_timeout: 5s
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `bind` | string | `127.0.0.1:8080` | Address and port to listen on |
+| `auth.bearer_token` | string | — | Bearer token for admin endpoints |
+| `auth.basic_user` | string | — | Basic auth username |
+| `auth.basic_pass` | string | — | Basic auth password |
+| `read_timeout` | duration | `10s` | HTTP read timeout |
+| `write_timeout` | duration | `30s` | HTTP write timeout |
+| `shutdown_timeout` | duration | `5s` | Graceful shutdown timeout |
+
+<Warning>
+If no `auth` is configured, admin endpoints (`/api/*`, `/status`) are **not mounted** at all. Only `/health` and webhooks are available.
+</Warning>
+
+## Authentication
+
+All `/api/*` and `/status` endpoints require authentication. Two methods are supported:
+
+- **Bearer token**: `Authorization: Bearer <token>`
+- **Basic auth**: `Authorization: Basic <base64(user:pass)>`
+
+If both are configured, bearer token takes precedence.
+
+## Endpoints
+
+### Public (no auth)
+
+#### `GET /health`
+
+Health check endpoint.
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+```json
+{"status": "ok"}
+```
+
+### Monitoring
+
+#### `GET /status`
+
+Runtime status with uptime, metrics, active sessions count, and provider health.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/status
+```
+
+```json
+{
+  "uptime_seconds": 3600,
+  "metrics": { ... },
+  "sessions": 5,
+  "providers": [{ "name": "openai", "healthy": true }]
+}
+```
+
+### Sessions
+
+#### `GET /api/sessions`
+
+List all active conversation sessions.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/sessions
+```
+
+#### `DELETE /api/sessions/{id}`
+
+Delete a session by its ID. Returns `204` on success, `404` if not found.
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/sessions/abc123
+```
+
+### Agents & Modules
+
+#### `GET /api/agents`
+
+List registered agent modules.
+
+#### `GET /api/modules`
+
+List all compiled modules.
+
+### Configuration
+
+#### `GET /api/config`
+
+Returns the current configuration with secrets redacted.
+
+#### `POST /api/config/reload`
+
+Triggers a hot-reload of the configuration from disk. Validates before applying.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/config/reload
+```
+
+### Crons
+
+See [Prompt Crons](/concepts/prompt-crons) for the full cron system documentation.
+
+#### `GET /api/crons`
+
+List all registered prompt crons with their last execution result.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/crons
+```
+
+```json
+[
+  {
+    "name": "revue-de-presse",
+    "description": "Daily French news review",
+    "schedule": "0 7 * * *",
+    "enabled": true,
+    "agent_id": "main",
+    "last_result": {
+      "name": "revue-de-presse",
+      "ran_at": "2026-03-09T07:00:00Z",
+      "duration_ms": 45000,
+      "stop_reason": "stop",
+      "iterations": 8,
+      "tool_calls": 6,
+      "total_tokens": 12500,
+      "content": "..."
+    }
+  }
+]
+```
+
+#### `GET /api/crons/{name}`
+
+Get a single prompt cron definition with its last execution result.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/crons/revue-de-presse
+```
+
+Returns `404` if the cron name does not exist.
+
+#### `POST /api/crons/{name}/trigger`
+
+Manually trigger a prompt cron. The job runs **asynchronously** in the background. Returns `202 Accepted` immediately.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/crons/revue-de-presse/trigger
+```
+
+```json
+{
+  "status": "triggered",
+  "name": "revue-de-presse",
+  "agent_id": "main"
+}
+```
+
+Poll `GET /api/crons/{name}` to check the result once execution completes.
+
+### OpenAPI Specification
+
+#### `GET /api/openapi.yaml`
+
+Returns the auto-generated OpenAPI 3.0 specification in YAML format. Covers all gateway endpoints with request/response schemas.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/openapi.yaml
+```
+
+## Webhooks
+
+Webhooks use per-source HMAC-SHA256 signature verification, independent from admin auth.
+
+```
+POST /webhooks/{source}
+```
+
+Configure webhook secrets in the gateway config:
+
+```yaml
+modules:
+  gateway.http:
+    webhooks:
+      github:
+        secret: "whsec_..."
+```

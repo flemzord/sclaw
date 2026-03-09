@@ -10,6 +10,7 @@ import (
 
 	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
+	"github.com/flemzord/sclaw/internal/cron"
 	"github.com/flemzord/sclaw/internal/provider"
 	"github.com/flemzord/sclaw/internal/router"
 	"github.com/flemzord/sclaw/internal/security"
@@ -38,6 +39,7 @@ type Gateway struct {
 	redactor      *security.Redactor
 	auditLogger   *security.AuditLogger
 	rateLimiter   *security.RateLimiter
+	cronTrigger   *cron.Trigger
 	reloadHandler interface {
 		HandleReloadFromConfig(context.Context, *config.Config) error
 	}
@@ -122,6 +124,11 @@ func (g *Gateway) Start() error {
 	if svc, ok := g.appCtx.GetService("security.ratelimiter"); ok {
 		if rl, ok := svc.(*security.RateLimiter); ok {
 			g.rateLimiter = rl
+		}
+	}
+	if svc, ok := g.appCtx.GetService("cron.trigger"); ok {
+		if ct, ok := svc.(*cron.Trigger); ok {
+			g.cronTrigger = ct
 		}
 	}
 	if svc, ok := g.appCtx.GetService("reload.handler"); ok {

@@ -36,7 +36,7 @@ type inputItem struct {
 
 	// Fields for type "function_call_output".
 	// CallID and Output are used; CallID is shared with function_call.
-	Output string `json:"output,omitempty"`
+	Output *string `json:"output,omitempty"`
 }
 
 // inputContentPart is a content part within an input message.

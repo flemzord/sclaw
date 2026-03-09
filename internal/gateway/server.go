@@ -28,6 +28,10 @@ func (g *Gateway) buildRouter() http.Handler {
 				r.Get("/modules", g.handleGetAllModules())
 				r.Get("/config", g.handleGetConfig())
 				r.Post("/config/reload", g.handleReloadConfig())
+				r.Get("/crons", g.handleListCrons())
+				r.Get("/crons/{name}", g.handleGetCron())
+				r.Post("/crons/{name}/trigger", g.handleTriggerCron())
+				r.Get("/openapi.yaml", g.handleOpenAPI())
 			})
 		})
 	} else {

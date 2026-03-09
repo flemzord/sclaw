@@ -71,10 +71,11 @@ func buildClientEvent(cfg Config, req provider.CompletionRequest) clientEvent {
 			}
 
 		case provider.MessageRoleTool:
+			output := m.Content
 			event.Input = append(event.Input, inputItem{
 				Type:   "function_call_output",
 				CallID: m.ToolID,
-				Output: m.Content,
+				Output: &output,
 			})
 		}
 	}

@@ -64,7 +64,9 @@
               "concepts/tools",
               "concepts/builtin-tools",
               "concepts/routing",
-              "concepts/context"
+              "concepts/context",
+              "concepts/prompt-crons",
+              "concepts/gateway"
             ]
           },
           {

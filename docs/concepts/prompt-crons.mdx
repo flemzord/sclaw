@@ -1,0 +1,190 @@
+---
+title: Prompt Crons
+description: "Scheduled prompts that run through the full agent loop on a cron schedule"
+icon: "clock"
+---
+
+Prompt crons are scheduled tasks defined as JSON files. Each cron runs a prompt through the full agent loop (with tools) on a cron schedule. Results can optionally be delivered to a channel (e.g., Telegram).
+
+## File Location
+
+Prompt crons are stored per-agent in:
+
+```
+{agent_data_dir}/crons/{name}.json
+```
+
+For example, with `data_dir: "data/agents/main"`:
+
+```
+data/agents/main/crons/revue-de-presse.json
+data/agents/main/crons/revue-tech.json
+```
+
+## Definition Format
+
+```json
+{
+  "name": "daily-report",
+  "description": "Generate a daily summary report",
+  "schedule": "0 9 * * *",
+  "enabled": true,
+  "prompt": "Generate a summary of...",
+  "tools": ["exec", "read_file", "write_file"],
+  "loop": {
+    "max_iterations": 10,
+    "timeout": "3m"
+  },
+  "output": {
+    "channel": "channel.telegram",
+    "chat_id": "123456789"
+  }
+}
+```
+
+### Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Unique identifier for the cron |
+| `description` | string | no | Human-readable description |
+| `schedule` | string | yes | Standard 5-field cron expression (minute, hour, day, month, weekday) |
+| `enabled` | boolean | yes | Whether the cron is active |
+| `prompt` | string | yes | The prompt sent to the agent as a user message |
+| `tools` | list | no | Tool names available during execution (empty = all agent tools) |
+| `loop.max_iterations` | integer | no | Maximum agent loop iterations (0 = unlimited) |
+| `loop.timeout` | string | no | Maximum execution duration (e.g., `"3m"`, `"30s"`) |
+| `output.channel` | string | conditional | Channel module ID for delivery (e.g., `"channel.telegram"`) |
+| `output.chat_id` | string | conditional | Chat/user ID for delivery |
+
+<Note>
+The `output` field is optional. If omitted, results are saved to disk only. If present, both `channel` and `chat_id` are required.
+</Note>
+
+## Schedule Syntax
+
+Standard 5-field cron expressions:
+
+```
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-6, Sunday=0)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+- `0 7 * * *` — every day at 7:00
+- `30 8 * * *` — every day at 8:30
+- `0 9 1 * *` — first of every month at 9:00
+- `*/5 * * * *` — every 5 minutes
+
+<Warning>
+The schedule uses the **server's timezone**. There is no per-cron timezone configuration.
+</Warning>
+
+## Output Delivery
+
+When `output` is configured, the **last assistant message** from the agent loop is sent to the specified channel and chat ID. This means your prompt should instruct the agent to produce the final message as its last response.
+
+```json
+"output": {
+  "channel": "channel.telegram",
+  "chat_id": "24510311"
+}
+```
+
+If the agent's final response is empty, no message is sent.
+
+## Result Storage
+
+Each execution writes the result to:
+
+```
+{agent_data_dir}/crons/results/{name}.json
+```
+
+Only the **last result** is kept (overwritten on each run).
+
+```json
+{
+  "name": "daily-report",
+  "ran_at": "2026-03-09T07:00:00Z",
+  "duration_ms": 45000,
+  "stop_reason": "stop",
+  "iterations": 8,
+  "tool_calls": 6,
+  "total_tokens": 12500,
+  "content": "The final assistant message...",
+  "error": ""
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `ran_at` | UTC timestamp of execution start |
+| `duration_ms` | Total execution time in milliseconds |
+| `stop_reason` | Why the loop ended: `stop`, `length`, `error`, `max_iterations` |
+| `iterations` | Number of agent loop iterations |
+| `tool_calls` | Total number of tool invocations |
+| `total_tokens` | Total tokens consumed |
+| `content` | Final assistant message (what gets sent to channel) |
+| `error` | Error message if execution failed |
+
+## Execution Model
+
+- Cron jobs run with **allow-all tool policy** (no user approval) since they are system-initiated
+- A per-job mutex prevents parallel execution of the same cron (if a tick fires while the previous run is still going, it is skipped)
+- Loop config merges agent defaults with cron overrides (`max_iterations`, `timeout`)
+- The agent receives the `prompt` as a user message with the agent's full system prompt (including SOUL.md)
+
+## Manual Trigger
+
+Prompt crons can be triggered manually via the [Gateway API](/concepts/gateway):
+
+```bash
+# Trigger
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/crons/daily-report/trigger
+
+# Check result
+curl -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/api/crons/daily-report
+```
+
+## CRUD Tools
+
+Agents can manage their own crons at runtime via built-in tools:
+
+| Tool | Scope | Default Policy | Description |
+|------|-------|----------------|-------------|
+| `cron_list` | `read_only` | `allow` | List all prompt cron definitions |
+| `cron_get` | `read_only` | `allow` | Get definition + last result |
+| `cron_create` | `read_write` | `ask` | Create a new prompt cron |
+| `cron_update` | `read_write` | `ask` | Update an existing prompt cron |
+| `cron_delete` | `read_write` | `ask` | Delete a prompt cron and its result |
+
+Write operations trigger a **hot-reload** via `reload.Handler` after mutations.
+
+## Example: Daily News Review
+
+```json
+{
+  "name": "revue-de-presse",
+  "description": "Daily French news review published to Telegraph + Telegram notification",
+  "schedule": "0 7 * * *",
+  "enabled": true,
+  "prompt": "Fetch the top headlines from 3 French news sources using exec with curl. Compile 6-10 topics. Publish to Telegraph. Your LAST message must be the Telegram notification text only.",
+  "tools": ["exec", "read_file", "write_file"],
+  "loop": {
+    "max_iterations": 15,
+    "timeout": "3m"
+  },
+  "output": {
+    "channel": "channel.telegram",
+    "chat_id": "24510311"
+  }
+}
+```
