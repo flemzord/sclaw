@@ -39,10 +39,14 @@ Too many active sessions. Please try again later.
 
 ## Agent Routing
 
-The router evaluates agents **in declaration order** and picks the first match:
+The router resolves agents by routing rule priority:
 
 ```yaml
 agents:
+  telegram-topic-bot:
+    routing:
+      threads: ["-1001234567890:42"]
+
   support:
     routing:
       channels: ["telegram"]
@@ -58,10 +62,33 @@ agents:
 ```
 
 Matching priority:
-1. **Channel match** — Does the message come from a listed channel?
-2. **User match** — Does the sender's ID appear in the `users` list?
+1. **User match** — Does the sender's ID appear in the `users` list?
+2. **Thread match** — Does the `chat_id:thread_id` pair appear in `threads`?
 3. **Group match** — Does the chat ID appear in the `groups` list?
-4. **Default** — Fallback when no other rule matches
+4. **Channel match** — Does the message come from a listed channel?
+5. **Default** — Fallback when no other rule matches
+
+Within a single rule type, declaration order breaks ties: the first matching agent wins.
+
+### Telegram Topics
+
+Telegram supergroups with Topics are exposed as message threads. The Telegram channel adapter maps Telegram's `message_thread_id` into the platform-agnostic `threadID`, so each Topic gets:
+
+- Its own session key (`channel:chatID:threadID`)
+- Its own conversation history
+- Optional agent-specific routing via `routing.threads`
+
+Use the `threads` field with the stable `chat_id:thread_id` format:
+
+```yaml
+agents:
+  releases:
+    routing:
+      threads:
+        - "-1001234567890:42"
+```
+
+This routes only messages from Topic `42` in supergroup `-1001234567890` to the `releases` agent.
 
 <Warning>
 At most one agent may be marked `default: true`. If no agent matches and there is no default, the message is dropped silently.

@@ -135,7 +135,8 @@ type APIResponse[T any] struct {
 
 // ResponseParameters contains information about why a request was unsuccessful.
 type ResponseParameters struct {
-	RetryAfter int `json:"retry_after,omitempty"`
+	RetryAfter      int   `json:"retry_after,omitempty"`
+	MigrateToChatID int64 `json:"migrate_to_chat_id,omitempty"`
 }
 
 // --- Request types ---
@@ -249,9 +250,10 @@ type getFileRequest struct {
 
 // APIError represents an error returned by the Telegram Bot API.
 type APIError struct {
-	Code        int    `json:"error_code"`
-	Description string `json:"description"`
-	RetryAfter  int    `json:"retry_after,omitempty"`
+	Code            int    `json:"error_code"`
+	Description     string `json:"description"`
+	RetryAfter      int    `json:"retry_after,omitempty"`
+	MigrateToChatID int64  `json:"migrate_to_chat_id,omitempty"`
 }
 
 // Error implements the error interface.

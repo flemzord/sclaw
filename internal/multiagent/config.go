@@ -110,9 +110,12 @@ func (c MemoryConfig) IsEnabled() bool {
 // RoutingConfig defines the routing rules that determine when an agent handles a message.
 type RoutingConfig struct {
 	Channels []string `yaml:"channels"`
-	Users    []string `yaml:"users"`
-	Groups   []string `yaml:"groups"`
-	Default  bool     `yaml:"default"`
+	// Threads routes messages from a specific chat thread/topic to this agent.
+	// Entries use the stable "chat_id:thread_id" format so lookups stay O(1).
+	Threads []string `yaml:"threads"`
+	Users   []string `yaml:"users"`
+	Groups  []string `yaml:"groups"`
+	Default bool     `yaml:"default"`
 }
 
 // LoopOverrides allows per-agent overrides of the ReAct loop parameters.

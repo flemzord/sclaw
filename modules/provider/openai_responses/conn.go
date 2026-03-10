@@ -25,8 +25,6 @@ type connManager struct {
 	logger *slog.Logger
 
 	mu     sync.Mutex
-	conn   *websocket.Conn
-	inUse  bool
 	closed bool
 }
 
@@ -38,46 +36,16 @@ func newConnManager(cfg Config, logger *slog.Logger) *connManager {
 	}
 }
 
-// getConn returns a valid WebSocket connection, dialing a new one if necessary.
-// It marks the connection as in-use; callers must call release() when done.
+// getConn returns a fresh WebSocket connection for one request.
+// Connections are never reused because coder/websocket closes on cancelled reads.
 func (cm *connManager) getConn(ctx context.Context) (*websocket.Conn, error) {
 	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
 	if cm.closed {
+		cm.mu.Unlock()
 		return nil, fmt.Errorf("%w: connection manager is closed", provider.ErrProviderDown)
 	}
-
-	if cm.inUse {
-		return nil, fmt.Errorf("%w: connection already in use", provider.ErrProviderDown)
-	}
-
-	// Always dial fresh — connection reuse is not reliable with coder/websocket
-	// because cancelling a Read (needed to stop an idle reader) closes the conn.
-	if cm.conn != nil {
-		cm.conn.CloseNow() //nolint:errcheck // best-effort close
-		cm.conn = nil
-	}
-
-	conn, err := cm.dial(ctx)
-	if err != nil {
-		return nil, err
-	}
-	cm.conn = conn
-	cm.inUse = true
-	return cm.conn, nil
-}
-
-// invalidate closes the current connection so a fresh one is dialed next time.
-func (cm *connManager) invalidate() {
-	cm.mu.Lock()
-	defer cm.mu.Unlock()
-
-	if cm.conn != nil {
-		cm.conn.CloseNow() //nolint:errcheck // best-effort close
-		cm.conn = nil
-	}
-	cm.inUse = false
+	cm.mu.Unlock()
+	return cm.dial(ctx)
 }
 
 // Close permanently shuts down the connection manager.
@@ -86,11 +54,6 @@ func (cm *connManager) Close() error {
 	defer cm.mu.Unlock()
 
 	cm.closed = true
-	if cm.conn != nil {
-		err := cm.conn.Close(websocket.StatusNormalClosure, "shutdown")
-		cm.conn = nil
-		return err
-	}
 	return nil
 }
 

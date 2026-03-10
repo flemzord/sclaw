@@ -173,12 +173,12 @@ func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest)
 	event := buildClientEvent(p.config, req)
 	payload, err := json.Marshal(event)
 	if err != nil {
-		p.conn.invalidate()
+		conn.CloseNow() //nolint:errcheck // best-effort close
 		return nil, fmt.Errorf("marshal response.create: %w", err)
 	}
 
 	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
-		p.conn.invalidate()
+		conn.CloseNow() //nolint:errcheck // best-effort close
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -191,7 +191,7 @@ func (p *Provider) doStream(ctx context.Context, req provider.CompletionRequest)
 	out := make(chan provider.StreamChunk, 16)
 	go func() {
 		defer close(out)
-		defer p.conn.invalidate()
+		defer conn.CloseNow() //nolint:errcheck // best-effort close
 		for chunk := range ch {
 			select {
 			case out <- chunk:

@@ -166,3 +166,25 @@ routing:
 		t.Error("Memory.IsEnabled() = true, want false")
 	}
 }
+
+func TestParseAgents_WithThreadRouting(t *testing.T) {
+	t.Parallel()
+
+	nodes := mustYAMLNodes(t, map[string]string{
+		"bot": `
+routing:
+  threads:
+    - "-100123:42"
+`,
+	})
+
+	agents, _, err := ParseAgents(nodes)
+	if err != nil {
+		t.Fatalf("ParseAgents() error = %v", err)
+	}
+
+	got := agents["bot"].Routing.Threads
+	if len(got) != 1 || got[0] != "-100123:42" {
+		t.Fatalf("Routing.Threads = %v, want [-100123:42]", got)
+	}
+}

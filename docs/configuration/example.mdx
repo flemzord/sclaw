@@ -52,6 +52,17 @@ agents:
       max_iterations: 10                  # Max ReAct loop cycles
       timeout: "5m"                       # Per-invocation timeout
 
+  # Topic-specific agent — only handles one Telegram supergroup Topic.
+  releases:
+    provider: "provider.openai_compatible"
+    memory:
+      enabled: true
+    routing:
+      threads: ["-1001234567890:42"]      # chat_id:thread_id for a Topic
+    loop:
+      max_iterations: 10
+      timeout: "5m"
+
   # Specialized coding agent — activated for a specific user.
   coder:
     provider: "provider.openai_compatible"

@@ -70,6 +70,37 @@ func TestRegistry_ResolveByGroup(t *testing.T) {
 	}
 }
 
+func TestRegistry_ResolveByThread(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"topic-bot": {
+			Routing: RoutingConfig{Threads: []string{"-100123:42"}},
+		},
+	}
+	order := []string{"topic-bot"}
+
+	reg, err := NewRegistry(agents, order)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	msg := message.InboundMessage{
+		Channel:  "channel.telegram",
+		Sender:   message.Sender{ID: "someone"},
+		Chat:     message.Chat{ID: "-100123"},
+		ThreadID: "42",
+	}
+
+	got, err := reg.Resolve(msg)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got != "topic-bot" {
+		t.Errorf("Resolve() = %q, want %q", got, "topic-bot")
+	}
+}
+
 func TestRegistry_ResolveByChannel(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +243,80 @@ func TestRegistry_PriorityCascade(t *testing.T) {
 	}
 	if got != "user-agent" {
 		t.Errorf("Resolve() = %q, want %q (user should win over channel)", got, "user-agent")
+	}
+}
+
+func TestRegistry_ThreadBeatsGroupAndChannel(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"thread-agent": {
+			Routing: RoutingConfig{Threads: []string{"-100123:42"}},
+		},
+		"group-agent": {
+			Routing: RoutingConfig{Groups: []string{"-100123"}},
+		},
+		"channel-agent": {
+			Routing: RoutingConfig{Channels: []string{"channel.telegram"}},
+		},
+		"default-agent": {
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	order := []string{"channel-agent", "default-agent", "group-agent", "thread-agent"}
+
+	reg, err := NewRegistry(agents, order)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	msg := message.InboundMessage{
+		Channel:  "channel.telegram",
+		Sender:   message.Sender{ID: "random-user"},
+		Chat:     message.Chat{ID: "-100123"},
+		ThreadID: "42",
+	}
+
+	got, err := reg.Resolve(msg)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got != "thread-agent" {
+		t.Errorf("Resolve() = %q, want %q (thread should win over group/channel/default)", got, "thread-agent")
+	}
+}
+
+func TestRegistry_InvalidThreadRouteIgnored(t *testing.T) {
+	t.Parallel()
+
+	agents := map[string]AgentConfig{
+		"broken": {
+			Routing: RoutingConfig{Threads: []string{"missing-separator"}},
+		},
+		"fallback": {
+			Routing: RoutingConfig{Default: true},
+		},
+	}
+	order := []string{"broken", "fallback"}
+
+	reg, err := NewRegistry(agents, order)
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+
+	msg := message.InboundMessage{
+		Channel:  "channel.telegram",
+		Sender:   message.Sender{ID: "random-user"},
+		Chat:     message.Chat{ID: "-100123"},
+		ThreadID: "42",
+	}
+
+	got, err := reg.Resolve(msg)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if got != "fallback" {
+		t.Errorf("Resolve() = %q, want %q", got, "fallback")
 	}
 }
 

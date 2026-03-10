@@ -32,16 +32,15 @@ func buildClientEvent(cfg Config, req provider.CompletionRequest) clientEvent {
 			event.Instructions += m.Content
 
 		case provider.MessageRoleUser:
-			item := inputItem{
-				Type: "message",
-				Role: "user",
+			content := buildUserContent(m)
+			if len(content) == 0 {
+				continue
 			}
-			if len(m.ContentParts) > 0 {
-				item.Content = convertContentParts(m.ContentParts)
-			} else {
-				item.Content = []inputContentPart{{Type: "input_text", Text: m.Content}}
-			}
-			event.Input = append(event.Input, item)
+			event.Input = append(event.Input, inputItem{
+				Type:    "message",
+				Role:    "user",
+				Content: content,
+			})
 
 		case provider.MessageRoleAssistant:
 			// If the assistant message has tool calls, emit one function_call per tool call.
@@ -62,7 +61,7 @@ func buildClientEvent(cfg Config, req provider.CompletionRequest) clientEvent {
 						Arguments: string(tc.Arguments),
 					})
 				}
-			} else {
+			} else if m.Content != "" {
 				event.Input = append(event.Input, inputItem{
 					Type:    "message",
 					Role:    "assistant",
@@ -96,14 +95,29 @@ func buildClientEvent(cfg Config, req provider.CompletionRequest) clientEvent {
 	return event
 }
 
+func buildUserContent(m provider.LLMMessage) []inputContentPart {
+	if len(m.ContentParts) > 0 {
+		return convertContentParts(m.ContentParts)
+	}
+	if m.Content == "" {
+		return nil
+	}
+	return []inputContentPart{{Type: "input_text", Text: m.Content}}
+}
+
 // convertContentParts converts provider.ContentPart slices to wire format.
 func convertContentParts(parts []provider.ContentPart) []inputContentPart {
 	result := make([]inputContentPart, 0, len(parts))
 	for _, p := range parts {
 		switch p.Type {
 		case provider.ContentPartText:
-			result = append(result, inputContentPart{Type: "input_text", Text: p.Text})
+			if p.Text != "" {
+				result = append(result, inputContentPart{Type: "input_text", Text: p.Text})
+			}
 		case provider.ContentPartImageURL:
+			if p.ImageURL == nil || p.ImageURL.URL == "" {
+				continue
+			}
 			cp := inputContentPart{
 				Type:     "input_image",
 				ImageURL: p.ImageURL.URL,

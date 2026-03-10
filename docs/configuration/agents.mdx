@@ -23,18 +23,45 @@ The `agents` section enables multi-agent mode. Each key is an agent name, and it
 
 ## Routing
 
-Routing rules determine which agent handles an incoming message. The router evaluates agents **in declaration order** and picks the first match. At most one agent may be marked as `default`.
+Routing rules determine which agent handles an incoming message. The router resolves matches by rule priority, and uses declaration order only to break ties within the same rule type. At most one agent may be marked as `default`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `channels` | list | — | Channel names this agent handles (e.g., `["telegram"]`). |
+| `threads` | list | — | Chat-thread routes in `chat_id:thread_id` format (useful for Telegram Topics). |
 | `users` | list | — | User IDs this agent responds to. |
 | `groups` | list | — | Group IDs this agent responds to. |
 | `default` | bool | `false` | Fallback agent when no other routing rule matches. |
 
+Routing priority is:
+
+1. `users`
+2. `threads`
+3. `groups`
+4. `channels`
+5. `default`
+
 <Warning>
 Only one agent may set `default: true`. If no agent matches and there is no default, the message is dropped.
 </Warning>
+
+### Telegram Topics
+
+For Telegram supergroups, `threads` lets you bind one Topic to one agent. Each entry uses `chat_id:thread_id`:
+
+```yaml
+agents:
+  support:
+    routing:
+      threads:
+        - "-1001234567890:42"
+```
+
+In this example, only messages from Topic `42` in supergroup `-1001234567890` are routed to `support`.
+
+<Note>
+The `chat_id` is the Telegram chat identifier for the supergroup, and the `thread_id` is Telegram's `message_thread_id`. sclaw already preserves this thread ID in session keys and outbound replies.
+</Note>
 
 ## Loop Parameters
 

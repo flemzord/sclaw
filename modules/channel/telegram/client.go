@@ -118,6 +118,7 @@ func do[T any](ctx context.Context, c *Client, method string, payload any) (*T, 
 			}
 			if apiResp.Parameters != nil {
 				apiErr.RetryAfter = apiResp.Parameters.RetryAfter
+				apiErr.MigrateToChatID = apiResp.Parameters.MigrateToChatID
 			}
 			return nil, apiErr
 		}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +141,70 @@ func TestSendChunk_ImageCaptionAutoMarkdownV2(t *testing.T) {
 	want := FormatMarkdownV2("A **nice** photo")
 	if captured.Caption != want {
 		t.Errorf("Caption = %q, want %q", captured.Caption, want)
+	}
+}
+
+func TestSendChunk_RetriesWhenGroupMigratesToSupergroup(t *testing.T) {
+	var chatIDs []int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		var req SendMessageRequest
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		chatIDs = append(chatIDs, req.ChatID)
+
+		if len(chatIDs) == 1 {
+			writeJSON(t, w, APIResponse[Message]{
+				OK:          false,
+				ErrorCode:   400,
+				Description: "Bad Request: group chat was upgraded to a supergroup chat",
+				Parameters: &ResponseParameters{
+					MigrateToChatID: -1009876543210,
+				},
+			})
+			return
+		}
+
+		writeJSON(t, w, APIResponse[Message]{
+			OK:     true,
+			Result: Message{MessageID: 1, Chat: Chat{ID: req.ChatID, Type: "supergroup"}},
+		})
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		client: NewClient("TOKEN", srv.URL),
+		logger: discardLogger(),
+		config: Config{StreamFlushInterval: 50 * time.Millisecond},
+	}
+
+	msg := message.OutboundMessage{
+		Chat: message.Chat{ID: "42", Type: message.ChatGroup},
+		Blocks: []message.ContentBlock{
+			{Type: message.BlockText, Text: "hello"},
+		},
+	}
+
+	if err := tg.sendOutbound(context.Background(), msg); err != nil {
+		t.Fatalf("sendOutbound() error: %v", err)
+	}
+
+	if len(chatIDs) != 2 {
+		t.Fatalf("send attempts = %d, want 2", len(chatIDs))
+	}
+	if chatIDs[0] != 42 {
+		t.Fatalf("first chatID = %d, want 42", chatIDs[0])
+	}
+	if chatIDs[1] != -1009876543210 {
+		t.Fatalf("second chatID = %d, want -1009876543210", chatIDs[1])
+	}
+	if strconv.FormatInt(chatIDs[1], 10) == msg.Chat.ID {
+		t.Fatal("expected retry to use migrated chat ID")
 	}
 }

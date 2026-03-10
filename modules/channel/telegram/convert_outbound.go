@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -50,113 +51,128 @@ func (t *Telegram) sendChunk(ctx context.Context, chunk message.OutboundMessage,
 	}
 
 	for _, block := range chunk.Blocks {
-		var err error
+		for {
+			var err error
 
-		switch block.Type {
-		case message.BlockText:
-			text := block.Text
-			pm := parseMode
-			if pm == "" {
-				text = FormatMarkdownV2(text)
-				pm = "MarkdownV2"
-			}
-			_, err = t.client.SendMessage(ctx, SendMessageRequest{
-				ChatID:                chatID,
-				Text:                  text,
-				ParseMode:             pm,
-				MessageThreadID:       threadID,
-				ReplyToMessageID:      replyToID,
-				DisableWebPagePreview: disablePreview,
-				DisableNotification:   disableNotification,
-			})
+			switch block.Type {
+			case message.BlockText:
+				text := block.Text
+				pm := parseMode
+				if pm == "" {
+					text = FormatMarkdownV2(text)
+					pm = "MarkdownV2"
+				}
+				_, err = t.client.SendMessage(ctx, SendMessageRequest{
+					ChatID:                chatID,
+					Text:                  text,
+					ParseMode:             pm,
+					MessageThreadID:       threadID,
+					ReplyToMessageID:      replyToID,
+					DisableWebPagePreview: disablePreview,
+					DisableNotification:   disableNotification,
+				})
 
-		case message.BlockImage:
-			caption := block.Caption
-			pm := parseMode
-			if pm == "" && caption != "" {
-				caption = FormatMarkdownV2(caption)
-				pm = "MarkdownV2"
-			}
-			_, err = t.client.SendPhoto(ctx, SendPhotoRequest{
-				ChatID:              chatID,
-				Photo:               block.URL,
-				Caption:             caption,
-				ParseMode:           pm,
-				MessageThreadID:     threadID,
-				ReplyToMessageID:    replyToID,
-				DisableNotification: disableNotification,
-			})
-
-		case message.BlockAudio:
-			caption := block.Caption
-			pm := parseMode
-			if pm == "" && caption != "" {
-				caption = FormatMarkdownV2(caption)
-				pm = "MarkdownV2"
-			}
-			if block.IsVoice {
-				_, err = t.client.SendVoice(ctx, SendVoiceRequest{
+			case message.BlockImage:
+				caption := block.Caption
+				pm := parseMode
+				if pm == "" && caption != "" {
+					caption = FormatMarkdownV2(caption)
+					pm = "MarkdownV2"
+				}
+				_, err = t.client.SendPhoto(ctx, SendPhotoRequest{
 					ChatID:              chatID,
-					Voice:               block.URL,
+					Photo:               block.URL,
 					Caption:             caption,
 					ParseMode:           pm,
 					MessageThreadID:     threadID,
 					ReplyToMessageID:    replyToID,
 					DisableNotification: disableNotification,
 				})
-			} else {
-				_, err = t.client.SendAudio(ctx, SendAudioRequest{
+
+			case message.BlockAudio:
+				caption := block.Caption
+				pm := parseMode
+				if pm == "" && caption != "" {
+					caption = FormatMarkdownV2(caption)
+					pm = "MarkdownV2"
+				}
+				if block.IsVoice {
+					_, err = t.client.SendVoice(ctx, SendVoiceRequest{
+						ChatID:              chatID,
+						Voice:               block.URL,
+						Caption:             caption,
+						ParseMode:           pm,
+						MessageThreadID:     threadID,
+						ReplyToMessageID:    replyToID,
+						DisableNotification: disableNotification,
+					})
+				} else {
+					_, err = t.client.SendAudio(ctx, SendAudioRequest{
+						ChatID:              chatID,
+						Audio:               block.URL,
+						Caption:             caption,
+						ParseMode:           pm,
+						MessageThreadID:     threadID,
+						ReplyToMessageID:    replyToID,
+						DisableNotification: disableNotification,
+					})
+				}
+
+			case message.BlockFile:
+				caption := block.Caption
+				pm := parseMode
+				if pm == "" && caption != "" {
+					caption = FormatMarkdownV2(caption)
+					pm = "MarkdownV2"
+				}
+				_, err = t.client.SendDocument(ctx, SendDocumentRequest{
 					ChatID:              chatID,
-					Audio:               block.URL,
+					Document:            block.URL,
 					Caption:             caption,
 					ParseMode:           pm,
 					MessageThreadID:     threadID,
 					ReplyToMessageID:    replyToID,
 					DisableNotification: disableNotification,
 				})
+
+			case message.BlockLocation:
+				if block.Lat == nil || block.Lon == nil {
+					t.logger.Warn("skipping location block with nil coordinates",
+						"chat_id", chatID,
+						"has_lat", block.Lat != nil,
+						"has_lon", block.Lon != nil,
+					)
+					err = nil
+				} else {
+					_, err = t.client.SendLocation(ctx, SendLocationRequest{
+						ChatID:              chatID,
+						Latitude:            *block.Lat,
+						Longitude:           *block.Lon,
+						MessageThreadID:     threadID,
+						ReplyToMessageID:    replyToID,
+						DisableNotification: disableNotification,
+					})
+				}
+
+			default:
+				// Skip unsupported block types (BlockRaw, BlockReaction, etc.).
+				err = nil
 			}
 
-		case message.BlockFile:
-			caption := block.Caption
-			pm := parseMode
-			if pm == "" && caption != "" {
-				caption = FormatMarkdownV2(caption)
-				pm = "MarkdownV2"
+			if err == nil {
+				break
 			}
-			_, err = t.client.SendDocument(ctx, SendDocumentRequest{
-				ChatID:              chatID,
-				Document:            block.URL,
-				Caption:             caption,
-				ParseMode:           pm,
-				MessageThreadID:     threadID,
-				ReplyToMessageID:    replyToID,
-				DisableNotification: disableNotification,
-			})
-
-		case message.BlockLocation:
-			if block.Lat == nil || block.Lon == nil {
-				t.logger.Warn("skipping location block with nil coordinates",
-					"chat_id", chatID,
-					"has_lat", block.Lat != nil,
-					"has_lon", block.Lon != nil,
+			apiErr := &APIError{}
+			ok := errors.As(err, &apiErr)
+			if ok && apiErr.MigrateToChatID != 0 && apiErr.MigrateToChatID != chatID {
+				t.logger.Info("telegram: chat migrated, retrying send",
+					"old_chat_id", chatID,
+					"new_chat_id", apiErr.MigrateToChatID,
+					"block_type", block.Type,
 				)
+				chatID = apiErr.MigrateToChatID
 				continue
 			}
-			_, err = t.client.SendLocation(ctx, SendLocationRequest{
-				ChatID:              chatID,
-				Latitude:            *block.Lat,
-				Longitude:           *block.Lon,
-				MessageThreadID:     threadID,
-				ReplyToMessageID:    replyToID,
-				DisableNotification: disableNotification,
-			})
-
-		default:
-			// Skip unsupported block types (BlockRaw, BlockReaction, etc.).
-			continue
-		}
-
-		if err != nil {
 			return fmt.Errorf("telegram: send %s block: %w", block.Type, err)
 		}
 	}

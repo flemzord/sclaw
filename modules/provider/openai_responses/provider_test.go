@@ -126,6 +126,68 @@ func TestCompleteSimpleText(t *testing.T) {
 	}
 }
 
+func TestConnManager_GetConn_AllowsMultipleActiveConnections(t *testing.T) {
+	srv := mockWSServer(t, func(conn *websocket.Conn) {
+		time.Sleep(50 * time.Millisecond)
+		_ = conn
+	})
+
+	cfg := testConfig(wsURL(srv))
+	cm := newConnManager(cfg, testLogger())
+
+	conn1, err := cm.getConn(context.Background())
+	if err != nil {
+		t.Fatalf("first getConn() error = %v", err)
+	}
+	defer conn1.CloseNow() //nolint:errcheck
+
+	conn2, err := cm.getConn(context.Background())
+	if err != nil {
+		t.Fatalf("second getConn() error = %v", err)
+	}
+	defer conn2.CloseNow() //nolint:errcheck
+
+	if conn1 == conn2 {
+		t.Fatal("expected distinct WebSocket connections")
+	}
+}
+
+func TestBuildClientEvent_SkipsEmptyUserInput(t *testing.T) {
+	event := buildClientEvent(testConfig("ws://example.invalid/v1/responses"), provider.CompletionRequest{
+		Messages: []provider.LLMMessage{
+			{Role: provider.MessageRoleUser, Content: ""},
+		},
+	})
+
+	if len(event.Input) != 0 {
+		t.Fatalf("len(event.Input) = %d, want 0", len(event.Input))
+	}
+}
+
+func TestBuildClientEvent_FiltersEmptyTextParts(t *testing.T) {
+	event := buildClientEvent(testConfig("ws://example.invalid/v1/responses"), provider.CompletionRequest{
+		Messages: []provider.LLMMessage{
+			{
+				Role: provider.MessageRoleUser,
+				ContentParts: []provider.ContentPart{
+					{Type: provider.ContentPartText, Text: ""},
+					{Type: provider.ContentPartImageURL, ImageURL: &provider.ImageURL{URL: "https://example.com/img.png"}},
+				},
+			},
+		},
+	})
+
+	if len(event.Input) != 1 {
+		t.Fatalf("len(event.Input) = %d, want 1", len(event.Input))
+	}
+	if len(event.Input[0].Content) != 1 {
+		t.Fatalf("len(event.Input[0].Content) = %d, want 1", len(event.Input[0].Content))
+	}
+	if event.Input[0].Content[0].Type != "input_image" {
+		t.Fatalf("content[0].Type = %q, want %q", event.Input[0].Content[0].Type, "input_image")
+	}
+}
+
 func TestCompleteWithToolCalls(t *testing.T) {
 	srv := mockWSServer(t, func(conn *websocket.Conn) {
 		// Read the response.create event.

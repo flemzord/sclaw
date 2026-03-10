@@ -264,6 +264,64 @@ func TestPipeline_GroupPolicyFilter(t *testing.T) {
 	}
 }
 
+func TestPipeline_UnsupportedInboundContent(t *testing.T) {
+	t.Parallel()
+
+	mockProv := &providertest.MockProvider{
+		CompleteFunc: func(_ context.Context, _ provider.CompletionRequest) (provider.CompletionResponse, error) {
+			t.Fatal("provider should not be called for unsupported inbound content")
+			return provider.CompletionResponse{}, nil
+		},
+		ContextWindowSizeFunc: func() int { return 4096 },
+		ModelNameFunc:         func() string { return "test-model" },
+	}
+	loop := agent.NewLoop(mockProv, nil, agent.LoopConfig{})
+
+	sender := &testResponseSender{}
+	store := NewInMemorySessionStore()
+
+	pipeline := NewPipeline(PipelineConfig{
+		Store:           store,
+		LaneLock:        NewLaneLock(),
+		GroupPolicy:     GroupPolicy{Mode: GroupPolicyAllowAll},
+		ApprovalManager: NewApprovalManager(),
+		AgentFactory:    &testAgentFactory{loop: loop},
+		ResponseSender:  sender,
+		Logger:          slog.Default(),
+	})
+
+	msg := message.InboundMessage{
+		ID:      "msg-raw",
+		Channel: "channel.telegram",
+		Sender:  message.Sender{ID: "user-1"},
+		Chat:    message.Chat{ID: "42", Type: message.ChatDM},
+		Blocks:  []message.ContentBlock{message.NewRawBlock([]byte(`{"kind":"sticker"}`))},
+	}
+	env := envelope{Message: msg, Key: SessionKeyFromMessage(msg)}
+
+	result := pipeline.Execute(context.Background(), env)
+	if !result.Skipped {
+		t.Fatal("expected unsupported inbound content to be skipped")
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if result.Session == nil {
+		t.Fatal("expected session to be present")
+	}
+	if len(result.Session.History) != 0 {
+		t.Fatalf("session history length = %d, want 0", len(result.Session.History))
+	}
+
+	sent := sender.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sender called %d times, want 1", len(sent))
+	}
+	if got := sent[0].TextContent(); got != "I couldn't extract any text or supported media from that message." {
+		t.Fatalf("error text = %q", got)
+	}
+}
+
 func TestPipeline_AgentFactoryError(t *testing.T) {
 	t.Parallel()
 

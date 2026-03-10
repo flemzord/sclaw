@@ -201,6 +201,16 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 
 	// Step 8: History — append user message to session history.
 	llmMsg := messageToLLM(env.Message)
+	if llmMsg.Content == "" && len(llmMsg.ContentParts) == 0 {
+		logger.Info("pipeline: inbound message has no supported LLM content",
+			"session_id", session.ID,
+			"channel", env.Message.Channel,
+			"chat_id", env.Message.Chat.ID,
+			"message_id", env.Message.ID,
+		)
+		p.sendError(ctx, env.Message, "I couldn't extract any text or supported media from that message.")
+		return PipelineResult{Session: session, Skipped: true}
+	}
 	session.History = append(session.History, llmMsg)
 
 	// Trim history to MaxHistoryLen to prevent unbounded growth.
