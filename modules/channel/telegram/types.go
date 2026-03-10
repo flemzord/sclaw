@@ -234,6 +234,17 @@ type SendLocationRequest struct {
 	MessageThreadID     int     `json:"message_thread_id,omitempty"`
 }
 
+// BotCommand represents a bot command for the setMyCommands API.
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+// setMyCommandsRequest is the request body for the setMyCommands method.
+type setMyCommandsRequest struct {
+	Commands []BotCommand `json:"commands"`
+}
+
 // sendChatActionRequest is the request body for the sendChatAction method.
 type sendChatActionRequest struct {
 	ChatID int64  `json:"chat_id"`

@@ -317,6 +317,28 @@ func wireRouter(
 		return fmt.Errorf("registering cron tools: %w", err)
 	}
 
+	// Register skill commands with channels that support command autocomplete.
+	skillCommands := factory.CollectSkillCommands()
+	if len(skillCommands) > 0 {
+		botCommands := make([]channel.BotCommand, len(skillCommands))
+		for i, sc := range skillCommands {
+			botCommands[i] = channel.BotCommand{
+				Command:     sc.Command,
+				Description: sc.Description,
+			}
+		}
+		for _, ch := range channels {
+			if cr, ok := ch.(channel.CommandRegistrar); ok {
+				if err := cr.RegisterCommands(context.Background(), botCommands); err != nil {
+					logger.Error("router: failed to register commands",
+						"channel", ch.ModuleInfo().ID,
+						"error", err,
+					)
+				}
+			}
+		}
+	}
+
 	logger.Info("router: wired", "channels", len(channels))
 	return nil
 }

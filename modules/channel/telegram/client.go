@@ -199,6 +199,18 @@ func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string
 	return err
 }
 
+// SetMyCommands sets the list of the bot's commands visible in the chat UI.
+func (c *Client) SetMyCommands(ctx context.Context, commands []BotCommand) error {
+	_, err := do[bool](ctx, c, "setMyCommands", setMyCommandsRequest{Commands: commands})
+	return err
+}
+
+// DeleteMyCommands removes all the bot's commands.
+func (c *Client) DeleteMyCommands(ctx context.Context) error {
+	_, err := do[bool](ctx, c, "deleteMyCommands", nil)
+	return err
+}
+
 // GetFile retrieves basic info about a file and prepares it for downloading.
 func (c *Client) GetFile(ctx context.Context, fileID string) (*File, error) {
 	return do[File](ctx, c, "getFile", getFileRequest{FileID: fileID})

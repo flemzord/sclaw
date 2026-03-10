@@ -202,6 +202,38 @@ func TestActivator_Ordering(t *testing.T) {
 	}
 }
 
+func TestActivator_CommandsPreserved(t *testing.T) {
+	t.Parallel()
+
+	skill := Skill{
+		Meta: SkillMeta{
+			Name:     "weather",
+			Trigger:  TriggerAuto,
+			Keywords: []string{"weather"},
+			Commands: []SkillCommand{
+				{Command: "weather", Description: "Get weather"},
+				{Command: "forecast", Description: "Get forecast"},
+			},
+		},
+		Body: "Weather body.",
+	}
+
+	a := NewSkillActivator()
+	result := a.Activate(ActivateRequest{
+		Skills:         []Skill{skill},
+		UserMessage:    "what's the weather?",
+		AvailableTools: nil,
+	})
+
+	if len(result) != 1 {
+		t.Fatalf("got %d skills, want 1", len(result))
+	}
+	if len(result[0].Meta.Commands) != 2 {
+		t.Errorf("Commands = %d, want 2 (commands should be preserved through activation)",
+			len(result[0].Meta.Commands))
+	}
+}
+
 func TestActivator_EmptyMessage(t *testing.T) {
 	t.Parallel()
 

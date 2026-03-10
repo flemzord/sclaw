@@ -389,3 +389,132 @@ func TestMergeSkills_EmptyLayers(t *testing.T) {
 		t.Errorf("got %d skills, want 0 for nil layers", len(result))
 	}
 }
+
+func TestParseSkill_WithCommands(t *testing.T) {
+	t.Parallel()
+
+	content := `---
+name: weather
+description: Weather forecasts
+trigger: auto
+keywords: [weather, forecast]
+commands:
+  - command: weather
+    description: Get current weather
+  - command: forecast
+    description: Get 5-day forecast
+---
+Weather skill body.
+`
+	skill, err := ParseSkill(content, "weather.md")
+	if err != nil {
+		t.Fatalf("ParseSkill() error: %v", err)
+	}
+
+	if len(skill.Meta.Commands) != 2 {
+		t.Fatalf("Commands = %d, want 2", len(skill.Meta.Commands))
+	}
+	if skill.Meta.Commands[0].Command != "weather" {
+		t.Errorf("Commands[0].Command = %q, want %q", skill.Meta.Commands[0].Command, "weather")
+	}
+	if skill.Meta.Commands[0].Description != "Get current weather" {
+		t.Errorf("Commands[0].Description = %q", skill.Meta.Commands[0].Description)
+	}
+	if skill.Meta.Commands[1].Command != "forecast" {
+		t.Errorf("Commands[1].Command = %q, want %q", skill.Meta.Commands[1].Command, "forecast")
+	}
+}
+
+func TestParseSkill_NoCommands(t *testing.T) {
+	t.Parallel()
+
+	skill, err := ParseSkill(validSkillContent, "test.md")
+	if err != nil {
+		t.Fatalf("ParseSkill() error: %v", err)
+	}
+
+	if skill.Meta.Commands != nil {
+		t.Errorf("Commands = %v, want nil for skill without commands", skill.Meta.Commands)
+	}
+}
+
+func TestCollectCommands_AggregatesAndDeduplicates(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{
+			Meta: SkillMeta{
+				Name: "weather",
+				Commands: []SkillCommand{
+					{Command: "weather", Description: "Get weather"},
+					{Command: "forecast", Description: "Get forecast"},
+				},
+			},
+		},
+		{
+			Meta: SkillMeta{
+				Name: "travel",
+				Commands: []SkillCommand{
+					{Command: "weather", Description: "Duplicate weather"}, // duplicate
+					{Command: "flights", Description: "Search flights"},
+				},
+			},
+		},
+		{
+			Meta: SkillMeta{
+				Name: "no-commands",
+			},
+		},
+	}
+
+	commands := CollectCommands(skills)
+	if len(commands) != 3 {
+		t.Fatalf("got %d commands, want 3", len(commands))
+	}
+
+	// First occurrence wins for duplicates.
+	if commands[0].Description != "Get weather" {
+		t.Errorf("commands[0].Description = %q, want %q", commands[0].Description, "Get weather")
+	}
+
+	names := make(map[string]bool)
+	for _, cmd := range commands {
+		names[cmd.Command] = true
+	}
+	if !names["weather"] || !names["forecast"] || !names["flights"] {
+		t.Errorf("unexpected command set: %v", commands)
+	}
+}
+
+func TestCollectCommands_SkipsEmptyCommandName(t *testing.T) {
+	t.Parallel()
+
+	skills := []Skill{
+		{
+			Meta: SkillMeta{
+				Name: "broken",
+				Commands: []SkillCommand{
+					{Command: "", Description: "Empty command"},
+					{Command: "valid", Description: "Valid command"},
+				},
+			},
+		},
+	}
+
+	commands := CollectCommands(skills)
+	if len(commands) != 1 {
+		t.Fatalf("got %d commands, want 1", len(commands))
+	}
+	if commands[0].Command != "valid" {
+		t.Errorf("command = %q, want %q", commands[0].Command, "valid")
+	}
+}
+
+func TestCollectCommands_Empty(t *testing.T) {
+	t.Parallel()
+
+	commands := CollectCommands(nil)
+	if commands != nil {
+		t.Errorf("got %v, want nil for nil skills", commands)
+	}
+}

@@ -440,6 +440,50 @@ func (f *Factory) ResolveSkills(agentID, userMessage string) (string, error) {
 	return workspace.FormatSkillsForPrompt(active), nil
 }
 
+// CollectSkillCommands aggregates all skill commands from builtin, global,
+// and per-agent skills across all registered agents. Commands are deduplicated
+// by name (first occurrence wins). This is used at startup to register bot
+// commands with platforms that support autocomplete (e.g. Telegram).
+func (f *Factory) CollectSkillCommands() []workspace.SkillCommand {
+	logger := f.cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	builtinSkills, err := workspace.LoadSkillsFromFS(f.cfg.BuiltinSkillsFS, workspace.BuiltinPathPrefix)
+	if err != nil {
+		logger.Error("multiagent: loading builtin skills for commands", "error", err)
+	}
+
+	globalSkills, err := workspace.LoadSkillsFromDir(f.cfg.GlobalSkillsDir)
+	if err != nil {
+		logger.Error("multiagent: loading global skills for commands", "error", err)
+	}
+
+	merged := workspace.MergeSkills(builtinSkills, globalSkills)
+
+	// Collect per-agent skills.
+	var allSkills []workspace.Skill
+	allSkills = append(allSkills, merged...)
+
+	for _, agentID := range f.currentRegistry().AgentIDs() {
+		agentCfg, ok := f.currentRegistry().AgentConfig(agentID)
+		if !ok {
+			continue
+		}
+		agentSkillsDir := filepath.Join(agentCfg.DataDir, "skills")
+		agentSkills, err := workspace.LoadSkillsFromDir(agentSkillsDir)
+		if err != nil {
+			logger.Error("multiagent: loading agent skills for commands",
+				"agent", agentID, "error", err)
+			continue
+		}
+		allSkills = append(allSkills, agentSkills...)
+	}
+
+	return workspace.CollectCommands(allSkills)
+}
+
 // ForCronJob builds an agent.Loop for cron execution with allow-all policy.
 // Unlike ForSession, it does not require a router.Session and uses a permissive
 // policy (all tools auto-approved) since cron jobs are system-initiated.

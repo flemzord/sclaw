@@ -21,14 +21,15 @@ func init() {
 
 // Compile-time interface guards.
 var (
-	_ channel.Channel          = (*Telegram)(nil)
-	_ channel.StreamingChannel = (*Telegram)(nil)
-	_ channel.TypingChannel    = (*Telegram)(nil)
-	_ core.Configurable        = (*Telegram)(nil)
-	_ core.Provisioner         = (*Telegram)(nil)
-	_ core.Validator           = (*Telegram)(nil)
-	_ core.Starter             = (*Telegram)(nil)
-	_ core.Stopper             = (*Telegram)(nil)
+	_ channel.Channel           = (*Telegram)(nil)
+	_ channel.StreamingChannel  = (*Telegram)(nil)
+	_ channel.TypingChannel     = (*Telegram)(nil)
+	_ channel.CommandRegistrar  = (*Telegram)(nil)
+	_ core.Configurable         = (*Telegram)(nil)
+	_ core.Provisioner          = (*Telegram)(nil)
+	_ core.Validator            = (*Telegram)(nil)
+	_ core.Starter              = (*Telegram)(nil)
+	_ core.Stopper              = (*Telegram)(nil)
 )
 
 // Telegram implements the Telegram Bot API channel for sclaw.
@@ -214,4 +215,31 @@ func (t *Telegram) SendTyping(ctx context.Context, chat message.Chat) error {
 		return fmt.Errorf("telegram: invalid chat ID %q: %w", chat.ID, err)
 	}
 	return t.client.SendChatAction(ctx, chatID, "typing")
+}
+
+// RegisterCommands implements channel.CommandRegistrar.
+// It sets the bot's command list via Telegram's setMyCommands API,
+// enabling slash-command autocomplete in the chat UI.
+func (t *Telegram) RegisterCommands(ctx context.Context, commands []channel.BotCommand) error {
+	if len(commands) == 0 {
+		if err := t.client.DeleteMyCommands(ctx); err != nil {
+			return fmt.Errorf("telegram: deleteMyCommands: %w", err)
+		}
+		t.logger.Info("telegram: cleared bot commands")
+		return nil
+	}
+
+	tgCommands := make([]BotCommand, len(commands))
+	for i, cmd := range commands {
+		tgCommands[i] = BotCommand{
+			Command:     cmd.Command,
+			Description: cmd.Description,
+		}
+	}
+
+	if err := t.client.SetMyCommands(ctx, tgCommands); err != nil {
+		return fmt.Errorf("telegram: setMyCommands: %w", err)
+	}
+	t.logger.Info("telegram: registered bot commands", "count", len(tgCommands))
+	return nil
 }

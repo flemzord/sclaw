@@ -35,13 +35,22 @@ var (
 	ErrMissingSkillName = errors.New("skill: missing required 'name' field")
 )
 
+// SkillCommand defines a slash command exposed by a skill.
+// Channels that support command registration (e.g. Telegram's setMyCommands)
+// use these to offer autocomplete when the user types "/".
+type SkillCommand struct {
+	Command     string `yaml:"command"`
+	Description string `yaml:"description"`
+}
+
 // SkillMeta holds the YAML frontmatter of a SKILL.md file.
 type SkillMeta struct {
-	Name          string      `yaml:"name"`
-	Description   string      `yaml:"description"`
-	ToolsRequired []string    `yaml:"tools_required"`
-	Trigger       TriggerMode `yaml:"trigger"`
-	Keywords      []string    `yaml:"keywords"`
+	Name          string         `yaml:"name"`
+	Description   string         `yaml:"description"`
+	ToolsRequired []string       `yaml:"tools_required"`
+	Trigger       TriggerMode    `yaml:"trigger"`
+	Keywords      []string       `yaml:"keywords"`
+	Commands      []SkillCommand `yaml:"commands"`
 }
 
 // Skill represents a parsed SKILL.md file.
@@ -265,6 +274,23 @@ func MergeSkills(layers ...[]Skill) []Skill {
 	}
 
 	return result
+}
+
+// CollectCommands aggregates all commands from the given skills.
+// Duplicate commands (by name) are deduplicated; the first occurrence wins.
+func CollectCommands(skills []Skill) []SkillCommand {
+	seen := make(map[string]bool)
+	var commands []SkillCommand
+	for _, s := range skills {
+		for _, cmd := range s.Meta.Commands {
+			if cmd.Command == "" || seen[cmd.Command] {
+				continue
+			}
+			seen[cmd.Command] = true
+			commands = append(commands, cmd)
+		}
+	}
+	return commands
 }
 
 // splitFrontmatter splits content into YAML frontmatter and body.
