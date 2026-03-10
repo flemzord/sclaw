@@ -74,7 +74,7 @@ If `op://` references are present but the `op` CLI is not found in `$PATH`, load
 
 ## Top-Level Structure
 
-The configuration file has five top-level keys:
+The configuration file has six top-level keys:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -83,6 +83,7 @@ The configuration file has five top-level keys:
 | `agents` | map | no | Per-agent configurations keyed by agent name. Omit for single-agent mode. |
 | `plugins` | list | no | Third-party Go module plugins to compile into the binary. |
 | `security` | object | no | Security settings (rate limits, sandbox, URL filter, plugin certification). |
+| `service` | object | no | Service (daemon) settings. Environment variables for launchd/systemd. See [Daemon Mode](/configuration/daemon). |
 
 ```yaml
 version: "1"
@@ -98,6 +99,9 @@ plugins:
 
 security:
   # Security settings (optional)...
+
+service:
+  # Daemon environment variables (optional)...
 ```
 
 ## Validation

@@ -30,6 +30,10 @@ type Config struct {
 
 	// OnePassword holds 1Password CLI settings for op:// secret resolution.
 	OnePassword *OnePasswordConfig `yaml:"onepassword,omitempty"`
+
+	// Service holds settings applied when running as a system service
+	// (launchd on macOS, systemd on Linux).
+	Service *ServiceSection `yaml:"service,omitempty"`
 }
 
 // RouterConfig holds router-level settings.
@@ -54,6 +58,15 @@ type OnePasswordConfig struct {
 	// Account is the 1Password account UUID or shorthand to use with --account.
 	// Required when multiple accounts are signed in and the default is not correct.
 	Account string `yaml:"account,omitempty"`
+}
+
+// ServiceSection holds settings for the system service (launchd/systemd).
+type ServiceSection struct {
+	// Env is a map of environment variables injected into the service
+	// definition at install time. Values support op:// references and
+	// ${VAR} expansion (resolved at config load time like the rest of
+	// the config file).
+	Env map[string]string `yaml:"env,omitempty"`
 }
 
 // PluginEntry identifies a third-party Go module to include in the build.

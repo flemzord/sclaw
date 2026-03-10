@@ -77,7 +77,9 @@ func (d *Daemon) Stop(_ service.Service) error {
 // service (LaunchAgent on macOS, user systemd on Linux). When true, it is
 // installed as a system-level daemon (LaunchDaemon / system systemd) which
 // typically requires root privileges.
-func ServiceConfig(cfgPath string, system bool) *service.Config {
+// extraEnv is merged into the service environment variables (from config
+// service.env section). PATH is always captured from the current process.
+func ServiceConfig(cfgPath string, system bool, extraEnv map[string]string) *service.Config {
 	args := []string{"start"}
 	if cfgPath != "" {
 		args = append(args, "--config", cfgPath)
@@ -98,13 +100,21 @@ func ServiceConfig(cfgPath string, system bool) *service.Config {
 		WorkingDirectory: workDir,
 	}
 
-	// Capture the current PATH so that CLI tools installed in non-standard
-	// locations (e.g. Homebrew on macOS) remain accessible when running
-	// under launchd or systemd, which use a minimal default PATH.
-	if path, ok := os.LookupEnv("PATH"); ok && path != "" {
-		cfg.EnvVars = map[string]string{
-			"PATH": path,
+	// Build service environment: start with user-defined vars from config,
+	// then ensure PATH is always captured from the current process so that
+	// CLI tools in non-standard locations (e.g. Homebrew) remain accessible
+	// under launchd/systemd which use a minimal default PATH.
+	envVars := make(map[string]string, len(extraEnv)+1)
+	for k, v := range extraEnv {
+		envVars[k] = v
+	}
+	if _, ok := envVars["PATH"]; !ok {
+		if path, ok := os.LookupEnv("PATH"); ok && path != "" {
+			envVars["PATH"] = path
 		}
+	}
+	if len(envVars) > 0 {
+		cfg.EnvVars = envVars
 	}
 
 	if !system {

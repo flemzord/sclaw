@@ -78,6 +78,14 @@ agents:
       timeout: "10m"
       loop_threshold: 3                   # Break after 3 identical actions
 
+# ─── Service (Daemon) ────────────────────────────────────────
+# Environment variables injected into the launchd/systemd service
+# definition at install time. Only relevant for `sclaw service install`.
+service:
+  env:
+    GOG_ACCOUNT: "you@gmail.com"          # Avoids --account on every gog call
+    LANG: "en_US.UTF-8"                   # Locale for CLI tools
+
 # ─── Security ─────────────────────────────────────────────────
 # All security features are optional. Omit for defaults (no limits).
 security:

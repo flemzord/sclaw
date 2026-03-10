@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/pkg/app"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
@@ -138,6 +139,22 @@ func newService(cfgPath string, system bool, logLevel slog.Level) (service.Servi
 		Date:       date,
 		LogLevel:   logLevel,
 	})
-	svcConfig := app.ServiceConfig(cfgPath, system)
+	svcConfig := app.ServiceConfig(cfgPath, system, loadServiceEnv(cfgPath))
 	return service.New(daemon, svcConfig)
+}
+
+// loadServiceEnv loads the service.env section from the config file.
+// Returns nil if the config cannot be loaded or has no service env vars.
+func loadServiceEnv(cfgPath string) map[string]string {
+	if cfgPath == "" {
+		return nil
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return nil
+	}
+	if cfg.Service == nil {
+		return nil
+	}
+	return cfg.Service.Env
 }

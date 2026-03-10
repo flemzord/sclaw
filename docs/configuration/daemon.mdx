@@ -120,6 +120,65 @@ sclaw service status
 
 </Steps>
 
+## Environment Variables
+
+When running as a service, the process does **not** inherit your shell environment — launchd and systemd use a minimal default `PATH` that excludes locations like `/opt/homebrew/bin` or `/usr/local/bin`.
+
+sclaw handles this automatically:
+
+- **PATH** is always captured from your shell at `service install` time and baked into the service definition.
+- **Custom variables** can be declared in the `service.env` section of your config file.
+
+### `service.env`
+
+Use this section to inject environment variables into the service definition:
+
+```yaml
+version: "1"
+
+service:
+  env:
+    GOG_ACCOUNT: "you@gmail.com"
+    LANG: "en_US.UTF-8"
+    EDITOR: "vim"
+    # 1Password references work here too
+    SOME_TOKEN: "op://MyVault/sclaw/token"
+    # Environment variable expansion works
+    HOME_OVERRIDE: "${HOME}"
+```
+
+These values are resolved at config load time (environment variable expansion and `op://` resolution happen before injection) and written into the service definition (launchd plist / systemd unit).
+
+<Note>
+Changes to `service.env` require a reinstall of the service to take effect:
+
+```bash
+sclaw service uninstall
+sclaw service install --config ~/.config/sclaw/sclaw.yaml
+sclaw service start
+```
+</Note>
+
+### PATH Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| No `service.env` | PATH is auto-captured from your shell |
+| `service.env` without PATH | PATH is auto-captured, other vars are added |
+| `service.env` with explicit PATH | Your explicit PATH is used (no auto-capture) |
+
+<Warning>
+If you override PATH explicitly, make sure it includes the directories for all CLI tools your agents use (e.g. `gog`, `op`, `gh`).
+</Warning>
+
+### What `service.env` Does NOT Do
+
+The `service.env` section only affects the **service definition** (launchd plist or systemd unit). It does not:
+
+- Set variables for interactive mode (`sclaw start`) — those come from your shell
+- Affect hot reload — changing `service.env` and sending SIGHUP has no effect on the running process environment
+- Replace `${VAR}` expansion in other config sections — use standard YAML `${VAR}` syntax for that
+
 ## Logs
 
 In daemon mode, logs go to the system log facility:
