@@ -213,6 +213,7 @@ metadata:
 | obsidian | auto | `obsidian`, `vault`, `obsidian-cli` |
 | tmux | auto | `tmux`, `terminal`, `session`, `pane` |
 | trello | auto | `trello`, `board`, `card`, `kanban` |
+| telegraph | auto | `telegraph`, `telegra.ph`, `publish`, `article` |
 | weather | auto | `weather`, `forecast`, `temperature`, `météo` |
 
 ### Key Packages
@@ -220,6 +221,34 @@ metadata:
 - `internal/workspace/skill.go` — `ParseSkill`, `SkillMeta` struct, frontmatter parsing
 - `internal/workspace/activator.go` — `SkillActivator.Activate` (3-pass: always → auto → manual)
 - `skills/embed.go` — `go:embed` directive for builtin skills
+
+## Daemon Mode
+
+sclaw can run as a system service via `kardianos/service`. The daemon wraps
+`RunWithContext()` behind the `service.Interface` (Start/Stop).
+
+### CLI
+
+```
+sclaw service install [--config path]   Install as system service
+sclaw service uninstall                 Remove the service
+sclaw service start                     Start the daemon
+sclaw service stop                      Stop the daemon
+sclaw service status                    Show service status
+```
+
+### Key Packages
+
+- `pkg/app/daemon.go` — `Daemon` struct (implements `service.Interface`), `ServiceConfig()`
+- `cmd/sclaw/service.go` — Cobra subcommands for install/uninstall/start/stop/status
+
+### Design Decisions
+
+- `Run()` delegates to `RunWithContext()` which accepts a `context.Context` for shutdown
+- In interactive mode, `Run()` creates its own signal-based context (SIGINT/SIGTERM)
+- In daemon mode, `Daemon.Start()` creates a cancellable context; `Daemon.Stop()` cancels it
+- SIGHUP handling for hot reload is independent of the shutdown context
+- The `--config` path is baked into the service definition via `service.Config.Arguments`
 
 ## Hot Reload
 
