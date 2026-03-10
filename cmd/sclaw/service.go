@@ -34,8 +34,8 @@ func serviceInstallCmd(cfgPath *string, system *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
 		Short: "Install sclaw as a system service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s, err := newService(*cfgPath, *system)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := newService(*cfgPath, *system, debugLogLevel(cmd))
 			if err != nil {
 				return err
 			}
@@ -53,8 +53,8 @@ func serviceUninstallCmd(cfgPath *string, system *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall the sclaw system service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s, err := newService(*cfgPath, *system)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := newService(*cfgPath, *system, debugLogLevel(cmd))
 			if err != nil {
 				return err
 			}
@@ -71,8 +71,8 @@ func serviceStartCmd(cfgPath *string, system *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "start",
 		Short: "Start the sclaw system service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s, err := newService(*cfgPath, *system)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := newService(*cfgPath, *system, debugLogLevel(cmd))
 			if err != nil {
 				return err
 			}
@@ -89,8 +89,8 @@ func serviceStopCmd(cfgPath *string, system *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the sclaw system service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s, err := newService(*cfgPath, *system)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := newService(*cfgPath, *system, debugLogLevel(cmd))
 			if err != nil {
 				return err
 			}
@@ -107,8 +107,8 @@ func serviceStatusCmd(cfgPath *string, system *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show the status of the sclaw system service",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			s, err := newService(*cfgPath, *system)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := newService(*cfgPath, *system, debugLogLevel(cmd))
 			if err != nil {
 				return err
 			}
@@ -130,13 +130,13 @@ func serviceStatusCmd(cfgPath *string, system *bool) *cobra.Command {
 }
 
 // newService creates a kardianos/service.Service backed by the sclaw Daemon.
-func newService(cfgPath string, system bool) (service.Service, error) {
+func newService(cfgPath string, system bool, logLevel slog.Level) (service.Service, error) {
 	daemon := app.NewDaemon(app.RunParams{
 		ConfigPath: cfgPath,
 		Version:    version,
 		Commit:     commit,
 		Date:       date,
-		LogLevel:   slog.LevelInfo,
+		LogLevel:   logLevel,
 	})
 	svcConfig := app.ServiceConfig(cfgPath, system)
 	return service.New(daemon, svcConfig)

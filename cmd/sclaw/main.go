@@ -27,6 +27,15 @@ var (
 	date    = "unknown"
 )
 
+// debugLogLevel returns slog.LevelDebug when the root --debug flag is set.
+func debugLogLevel(cmd *cobra.Command) slog.Level {
+	debug, _ := cmd.Root().PersistentFlags().GetBool("debug")
+	if debug {
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
+}
+
 func main() {
 	if err := rootCmd().Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -41,6 +50,7 @@ func rootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.PersistentFlags().Bool("debug", false, "Enable debug logging")
 	root.AddCommand(versionCmd(), startCmd(), configCmd(), initCmd(), serviceCmd())
 	return root
 }
@@ -70,24 +80,17 @@ func startCmd() *cobra.Command {
 		Short: "Start sclaw with all configured modules",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfgPath, _ := cmd.Flags().GetString("config")
-			debug, _ := cmd.Flags().GetBool("debug")
-
-			logLevel := slog.LevelInfo
-			if debug {
-				logLevel = slog.LevelDebug
-			}
 
 			return app.Run(app.RunParams{
 				ConfigPath: cfgPath,
 				Version:    version,
 				Commit:     commit,
 				Date:       date,
-				LogLevel:   logLevel,
+				LogLevel:   debugLogLevel(cmd),
 			})
 		},
 	}
 	cmd.Flags().StringP("config", "c", "", "Path to configuration file")
-	cmd.Flags().Bool("debug", false, "Enable debug logging")
 	return cmd
 }
 
@@ -100,7 +103,7 @@ func configCmd() *cobra.Command {
 		Use:   "check [path]",
 		Short: "Validate configuration",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			var cfgPath string
 			if len(args) > 0 {
 				cfgPath = args[0]
@@ -120,7 +123,7 @@ func configCmd() *cobra.Command {
 			}
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-				Level: slog.LevelInfo,
+				Level: debugLogLevel(cmd),
 			}))
 			appCtx := core.NewAppContext(logger, app.DefaultDataDir(), app.DefaultWorkspace())
 			appCtx = appCtx.WithModuleConfigs(cfg.Modules)

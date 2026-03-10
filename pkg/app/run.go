@@ -84,6 +84,7 @@ func RunWithContext(ctx context.Context, params RunParams) error {
 		Level: params.LogLevel,
 	})
 	logger := slog.New(security.NewRedactingHandler(innerHandler, redactor))
+	slog.SetDefault(logger)
 
 	// Initialize audit logger.
 	auditLogger := security.NewAuditLogger(security.AuditLoggerConfig{
