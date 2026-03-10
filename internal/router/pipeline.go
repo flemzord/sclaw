@@ -140,6 +140,12 @@ func (p *Pipeline) Execute(ctx context.Context, env envelope) PipelineResult {
 		return PipelineResult{Session: session, Skipped: true}
 	}
 
+	// Step 4b: Command interception — handle /new before any processing.
+	if strings.TrimSpace(env.Message.TextContent()) == "/new" {
+		p.handleNewCommand(ctx, env, session, logger)
+		return PipelineResult{Session: session, Skipped: true}
+	}
+
 	// Step 5: Lane lock acquire (step 15 releases via defer).
 	// C-13 fix: Lane lock is acquired BEFORE hook before_process so that
 	// the session pointer is protected by the lane lock when hooks access it.
@@ -597,6 +603,34 @@ func (p *Pipeline) executeSyncFallback(
 	}
 
 	return p.finalize(ctx, env, session, resp, hookMeta, logger)
+}
+
+// handleNewCommand resets the conversation by deleting the session and purging
+// persistent history, then sends a confirmation message.
+func (p *Pipeline) handleNewCommand(ctx context.Context, env envelope, session *Session, logger *slog.Logger) {
+	logger.Info("pipeline: /new command — resetting session",
+		"session_id", session.ID, "agent_id", session.AgentID)
+
+	// Purge persistent history if available.
+	if p.cfg.HistoryResolver != nil && session.AgentID != "" {
+		if store := p.cfg.HistoryResolver.ResolveHistory(session.AgentID); store != nil {
+			pKey := persistenceKey(env.Key)
+			if err := store.Purge(pKey); err != nil {
+				logger.Warn("pipeline: /new failed to purge history", "error", err)
+			}
+		}
+	}
+
+	// Delete in-memory session so the next message gets a fresh one.
+	p.cfg.Store.Delete(env.Key)
+
+	// Send confirmation to user.
+	confirm := message.NewTextMessage(env.Message.Chat, "Conversation reset. Send a message to start fresh.")
+	confirm.Channel = env.Message.Channel
+	confirm.ThreadID = env.Message.ThreadID
+	if err := p.cfg.ResponseSender.Send(ctx, confirm); err != nil {
+		logger.Error("pipeline: /new failed to send confirmation", "error", err)
+	}
 }
 
 // sendError sends a user-friendly error message via ResponseSender. Never panics.
