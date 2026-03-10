@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -96,6 +97,16 @@ func ServiceConfig(cfgPath string, system bool) *service.Config {
 		Arguments:        args,
 		WorkingDirectory: workDir,
 	}
+
+	// Capture the current PATH so that CLI tools installed in non-standard
+	// locations (e.g. Homebrew on macOS) remain accessible when running
+	// under launchd or systemd, which use a minimal default PATH.
+	if path, ok := os.LookupEnv("PATH"); ok && path != "" {
+		cfg.EnvVars = map[string]string{
+			"PATH": path,
+		}
+	}
+
 	if !system {
 		cfg.Option = service.KeyValue{
 			"UserService": true,
