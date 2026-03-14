@@ -127,12 +127,21 @@ func (j *MemoryExtractionJob) Run(ctx context.Context) error {
 		agentID string
 	}
 	var sessions []sessionEntry
+	activeIDs := make(map[string]struct{})
 	j.Sessions.Range(func(sessionID, agentID string) bool {
 		if j.AgentID == "" || agentID == j.AgentID {
 			sessions = append(sessions, sessionEntry{id: sessionID, agentID: agentID})
+			activeIDs[sessionID] = struct{}{}
 		}
 		return true
 	})
+
+	// Evict lastLen entries for sessions that no longer exist.
+	for id := range j.lastLen {
+		if _, ok := activeIDs[id]; !ok {
+			delete(j.lastLen, id)
+		}
+	}
 
 	const maxConsecutiveErrors = 3
 	consecutiveErrors := 0

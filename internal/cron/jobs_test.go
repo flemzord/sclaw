@@ -406,6 +406,63 @@ func TestMemoryExtractionJob_Run_FiltersByAgent(t *testing.T) {
 	}
 }
 
+func TestMemoryExtractionJob_Run_EvictsStaleLastLen(t *testing.T) {
+	t.Parallel()
+
+	history := memory.NewInMemoryHistoryStore()
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "Hi"})
+	_ = history.Append("sess1", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Hello"})
+	_ = history.Append("sess2", provider.LLMMessage{Role: provider.MessageRoleUser, Content: "Hey"})
+	_ = history.Append("sess2", provider.LLMMessage{Role: provider.MessageRoleAssistant, Content: "Yo"})
+
+	store := memory.NewInMemoryStore()
+	extractor := &staticExtractor{
+		facts: []memory.Fact{{Content: "fact"}},
+	}
+
+	// Both sessions active on first run.
+	ranger := &testSessionRanger{
+		sessions: []struct{ id, agentID string }{
+			{"sess1", ""},
+			{"sess2", ""},
+		},
+	}
+
+	j := &MemoryExtractionJob{
+		Logger:    slog.Default(),
+		Sessions:  ranger,
+		History:   history,
+		Store:     store,
+		Extractor: extractor,
+	}
+
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+
+	// Both sessions should be tracked in lastLen.
+	if len(j.lastLen) != 2 {
+		t.Fatalf("run 1: lastLen size = %d, want 2", len(j.lastLen))
+	}
+
+	// Remove sess2 from active sessions (simulating session cleanup).
+	ranger.sessions = []struct{ id, agentID string }{
+		{"sess1", ""},
+	}
+
+	if err := j.Run(context.Background()); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+
+	// sess2 should have been evicted from lastLen.
+	if len(j.lastLen) != 1 {
+		t.Errorf("run 2: lastLen size = %d, want 1", len(j.lastLen))
+	}
+	if _, ok := j.lastLen["sess2"]; ok {
+		t.Error("run 2: sess2 should have been evicted from lastLen")
+	}
+}
+
 func TestMemoryExtractionJob_Run_CircuitBreaker(t *testing.T) {
 	t.Parallel()
 
