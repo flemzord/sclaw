@@ -65,6 +65,9 @@ type ExecutionEnv struct {
 	// PathFilter, if non-nil, grants read or read-write access to
 	// directories outside the workspace.
 	PathFilter *security.PathFilter
+
+	// SessionID identifies the session for per-session rate limiting.
+	SessionID string
 }
 
 // Output is the result of a tool execution.

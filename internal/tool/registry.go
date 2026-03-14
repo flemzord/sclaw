@@ -182,7 +182,7 @@ func (r *Registry) Execute(
 	r.mu.RUnlock()
 
 	if rl != nil {
-		if err := rl.Allow("tool_call"); err != nil {
+		if err := rl.Allow(env.SessionID, "tool_call"); err != nil {
 			if al != nil {
 				al.Log(security.AuditEvent{
 					Type:     security.EventRateLimit,

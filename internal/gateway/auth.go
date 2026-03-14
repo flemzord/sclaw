@@ -17,7 +17,7 @@ func authMiddleware(cfg AuthConfig, auditLogger *security.AuditLogger, rateLimit
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Rate limit auth attempts using the central rate limiter.
 			if rateLimiter != nil {
-				if err := rateLimiter.Allow("auth"); err != nil {
+				if err := rateLimiter.Allow(r.RemoteAddr, "auth"); err != nil {
 					http.Error(w, "too many requests", http.StatusTooManyRequests)
 					return
 				}

@@ -27,13 +27,20 @@ func rateLimitConfigDefaults() RateLimitConfig {
 	}
 }
 
-// RateLimiter implements sliding window rate limiting using stdlib only.
-// Each bucket tracks timestamps of recent events within its window.
+// bucketTemplate defines the window and limit for a rate limit kind.
+type bucketTemplate struct {
+	window time.Duration
+	limit  int
+}
+
+// RateLimiter implements per-session sliding window rate limiting using stdlib only.
+// Each session gets independent buckets keyed by "sessionID:kind".
 type RateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-	config  RateLimitConfig
-	now     func() time.Time
+	mu        sync.Mutex
+	buckets   map[string]*bucket
+	templates map[string]bucketTemplate
+	config    RateLimitConfig
+	now       func() time.Time
 }
 
 type bucket struct {
@@ -56,41 +63,66 @@ func NewRateLimiter(cfg RateLimitConfig) *RateLimiter {
 		cfg.ToolCallsPerMin = defaults.ToolCallsPerMin
 	}
 
-	rl := &RateLimiter{
-		config: cfg,
-		now:    time.Now,
-		buckets: map[string]*bucket{
-			"message": {
-				window: time.Minute,
-				limit:  cfg.MessagesPerMin,
-			},
-			"tool_call": {
-				window: time.Minute,
-				limit:  cfg.ToolCallsPerMin,
-			},
+	templates := map[string]bucketTemplate{
+		"message": {
+			window: time.Minute,
+			limit:  cfg.MessagesPerMin,
+		},
+		"tool_call": {
+			window: time.Minute,
+			limit:  cfg.ToolCallsPerMin,
 		},
 	}
 
 	if cfg.TokensPerHour > 0 {
-		rl.buckets["token"] = &bucket{
+		templates["token"] = bucketTemplate{
 			window: time.Hour,
 			limit:  cfg.TokensPerHour,
 		}
 	}
 
-	return rl
+	return &RateLimiter{
+		config:    cfg,
+		now:       time.Now,
+		buckets:   make(map[string]*bucket),
+		templates: templates,
+	}
 }
 
-// Allow checks whether an event of the given kind is allowed.
+// bucketKey returns the per-session bucket key.
+func bucketKey(sessionID, kind string) string {
+	return sessionID + ":" + kind
+}
+
+// getOrCreateBucket returns the bucket for the given session and kind,
+// creating it lazily from the template if it doesn't exist yet.
+func (rl *RateLimiter) getOrCreateBucket(sessionID, kind string) *bucket {
+	tmpl, ok := rl.templates[kind]
+	if !ok {
+		return nil
+	}
+
+	key := bucketKey(sessionID, kind)
+	b, ok := rl.buckets[key]
+	if !ok {
+		b = &bucket{
+			window: tmpl.window,
+			limit:  tmpl.limit,
+		}
+		rl.buckets[key] = b
+	}
+	return b
+}
+
+// Allow checks whether an event of the given kind is allowed for the session.
 // Returns nil if allowed, ErrRateLimited if the limit is exceeded.
 // kind must be one of: "message", "tool_call", "token".
-func (rl *RateLimiter) Allow(kind string) error {
+func (rl *RateLimiter) Allow(sessionID, kind string) error {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	b, ok := rl.buckets[kind]
-	if !ok {
-		// Unknown kind = no limit configured.
+	b := rl.getOrCreateBucket(sessionID, kind)
+	if b == nil {
 		return nil
 	}
 
@@ -108,17 +140,17 @@ func (rl *RateLimiter) Allow(kind string) error {
 // TODO: For high-volume token counting, consider storing a counter per time
 // bucket rather than individual timestamps to reduce memory usage.
 
-// AllowN checks whether n events of the given kind are allowed.
+// AllowN checks whether n events of the given kind are allowed for the session.
 // Useful for token counting where a single request consumes multiple tokens.
-func (rl *RateLimiter) AllowN(kind string, n int) error {
+func (rl *RateLimiter) AllowN(sessionID, kind string, n int) error {
 	if n <= 0 {
 		return nil
 	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	b, ok := rl.buckets[kind]
-	if !ok {
+	b := rl.getOrCreateBucket(sessionID, kind)
+	if b == nil {
 		return nil
 	}
 
@@ -133,6 +165,19 @@ func (rl *RateLimiter) AllowN(kind string, n int) error {
 		b.events = append(b.events, now)
 	}
 	return nil
+}
+
+// RemoveSession evicts all rate limit buckets for the given session.
+func (rl *RateLimiter) RemoveSession(sessionID string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	prefix := sessionID + ":"
+	for key := range rl.buckets {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			delete(rl.buckets, key)
+		}
+	}
 }
 
 // MaxSessions returns the configured maximum number of concurrent sessions.

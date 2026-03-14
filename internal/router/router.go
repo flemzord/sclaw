@@ -203,21 +203,20 @@ func (r *Router) Submit(msg message.InboundMessage) error {
 		}
 	}
 
-	// Rate limit check for messages.
-	// TODO: Current rate limiting is global (all users share one bucket).
-	// Consider implementing per-session or per-user rate limiting to prevent
-	// a single user from exhausting the quota for all others.
+	key := SessionKeyFromMessage(msg)
+
+	// Per-session rate limit check for messages.
 	if r.config.RateLimiter != nil {
-		if err := r.config.RateLimiter.Allow("message"); err != nil {
+		sessionID := key.Channel + ":" + key.ChatID + ":" + key.ThreadID
+		if err := r.config.RateLimiter.Allow(sessionID, "message"); err != nil {
 			r.logger.Warn("router: message rate limited",
 				"channel", msg.Channel,
 				"chat_id", msg.Chat.ID,
+				"session_id", sessionID,
 			)
 			return err
 		}
 	}
-
-	key := SessionKeyFromMessage(msg)
 	env := envelope{Message: msg, Key: key}
 
 	// Non-blocking send — drop with warning if inbox is full.

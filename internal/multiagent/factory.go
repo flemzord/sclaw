@@ -209,6 +209,7 @@ func (f *Factory) ForSession(session *router.Session, msg message.InboundMessage
 			SanitizedEnv: f.cfg.SanitizedEnv,
 			URLFilter:    f.cfg.URLFilter,
 			PathFilter:   pathFilter,
+			SessionID:    session.ID,
 		},
 	})
 
