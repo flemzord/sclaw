@@ -10,6 +10,7 @@ import (
 	"github.com/flemzord/sclaw/internal/core"
 	_ "github.com/flemzord/sclaw/internal/gateway"
 	_ "github.com/flemzord/sclaw/modules/channel/telegram"
+	_ "github.com/flemzord/sclaw/modules/hook/metrics"
 	_ "github.com/flemzord/sclaw/modules/memory/sqlite"
 	_ "github.com/flemzord/sclaw/modules/provider/openai_compatible"
 	_ "github.com/flemzord/sclaw/modules/provider/openai_responses"

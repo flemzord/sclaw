@@ -73,4 +73,6 @@ type Response struct {
 	TotalUsage provider.TokenUsage
 	Iterations int
 	StopReason StopReason
+	Model      string
+	Provider   string
 }

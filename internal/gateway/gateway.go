@@ -187,6 +187,27 @@ func (g *Gateway) Stop(ctx context.Context) error {
 	return g.server.Shutdown(shutdownCtx)
 }
 
+// resolveMetricsHandler discovers the metrics HTTP handler and path from the
+// service registry. Returns (nil, "") if the hook.metrics module is not loaded.
+func (g *Gateway) resolveMetricsHandler() (http.Handler, string) {
+	svcHandler, ok := g.appCtx.GetService("hook.metrics.handler")
+	if !ok {
+		return nil, ""
+	}
+	handler, ok := svcHandler.(http.Handler)
+	if !ok {
+		return nil, ""
+	}
+	path := "/metrics"
+	if svcPath, ok := g.appCtx.GetService("hook.metrics.path"); ok {
+		if p, ok := svcPath.(string); ok && p != "" {
+			path = p
+		}
+	}
+	g.logger.Info("gateway: metrics endpoint mounted", "path", path)
+	return handler, path
+}
+
 // configPath returns the config path if embedded in the gateway config.
 // This is a placeholder — the actual config path is typically injected.
 func (c *Config) configPath() string {

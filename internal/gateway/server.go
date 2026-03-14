@@ -13,6 +13,11 @@ func (g *Gateway) buildRouter() http.Handler {
 	// Public — no auth required.
 	r.Get("/health", g.handleHealth())
 
+	// Metrics endpoint — mounted if hook.metrics module is loaded.
+	if handler, path := g.resolveMetricsHandler(); handler != nil {
+		r.Get(path, handler.ServeHTTP)
+	}
+
 	// Webhooks — own HMAC auth per source.
 	r.Post("/webhooks/{source}", g.dispatcher.ServeHTTP)
 

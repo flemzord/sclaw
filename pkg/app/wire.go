@@ -11,6 +11,7 @@ import (
 	"github.com/flemzord/sclaw/internal/config"
 	"github.com/flemzord/sclaw/internal/core"
 	"github.com/flemzord/sclaw/internal/cron"
+	"github.com/flemzord/sclaw/internal/hook"
 	"github.com/flemzord/sclaw/internal/memory"
 	"github.com/flemzord/sclaw/internal/multiagent"
 	"github.com/flemzord/sclaw/internal/provider"
@@ -104,6 +105,10 @@ func wireRouter(
 	dispatcher := channel.NewDispatcher()
 	var channels []channel.Channel
 	var defaultProvider provider.Provider
+	var defaultProviderName string
+
+	// Hook pipeline for before_process / before_send / after_send hooks.
+	hookPipeline := hook.NewPipeline()
 
 	for _, id := range ids {
 		mod, ok := app.Module(id)
@@ -121,7 +126,18 @@ func wireRouter(
 		}
 		if p, ok := mod.(provider.Provider); ok {
 			defaultProvider = p
+			defaultProviderName = id
 			logger.Info("router: discovered provider", "module", id)
+		}
+		if hp, ok := mod.(hook.Provider); ok {
+			for _, h := range hp.Hooks() {
+				hookPipeline.Register(h)
+				logger.Info("router: registered hook",
+					"module", id,
+					"position", h.Position(),
+					"priority", h.Priority(),
+				)
+			}
 		}
 	}
 
@@ -231,16 +247,17 @@ func wireRouter(
 	globalSkillsDir := filepath.Join(appCtx.DataDir, "skills")
 
 	factory := multiagent.NewFactory(multiagent.FactoryConfig{
-		Registry:        registry,
-		DefaultProvider: defaultProvider,
-		GlobalTools:     globalTools,
-		Logger:          logger,
-		AuditLogger:     auditLogger,
-		RateLimiter:     rateLimiter,
-		URLFilter:       urlFilter,
-		SanitizedEnv:    sanitizedEnv,
-		BuiltinSkillsFS: skills.BuiltinFS,
-		GlobalSkillsDir: globalSkillsDir,
+		Registry:            registry,
+		DefaultProvider:     defaultProvider,
+		DefaultProviderName: defaultProviderName,
+		GlobalTools:         globalTools,
+		Logger:              logger,
+		AuditLogger:         auditLogger,
+		RateLimiter:         rateLimiter,
+		URLFilter:           urlFilter,
+		SanitizedEnv:        sanitizedEnv,
+		BuiltinSkillsFS:     skills.BuiltinFS,
+		GlobalSkillsDir:     globalSkillsDir,
 	})
 
 	// Create sub-agent manager and wire it into the factory.
@@ -270,6 +287,7 @@ func wireRouter(
 		GroupPolicy:     groupPolicy,
 		Logger:          logger,
 		RateLimiter:     rateLimiter,
+		HookPipeline:    hookPipeline,
 		HistoryResolver: factory,
 		SoulResolver:    factory,
 		SkillResolver:   factory,

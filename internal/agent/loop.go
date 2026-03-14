@@ -113,11 +113,19 @@ func emitStreamEvent(ctx context.Context, ch chan<- StreamEvent, event StreamEve
 	}
 }
 
+// enrichResponse sets the Model and Provider fields from the loop's provider.
+func (l *Loop) enrichResponse(r *Response) {
+	r.Model = l.provider.ModelName()
+	r.Provider = l.config.ProviderName
+}
+
 // Run executes the ReAct loop synchronously and returns the final response.
 //
 // A context.WithTimeout is applied using l.config.Timeout. If the caller's
 // context already carries a shorter deadline, the shorter one takes effect.
-func (l *Loop) Run(ctx context.Context, req Request) (Response, error) {
+func (l *Loop) Run(ctx context.Context, req Request) (resp Response, err error) {
+	defer l.enrichResponse(&resp)
+
 	ctx, cancel := context.WithTimeout(ctx, l.config.Timeout)
 	defer cancel()
 
@@ -307,6 +315,7 @@ func (l *Loop) RunStream(ctx context.Context, req Request) (<-chan StreamEvent, 
 					Iterations: i + 1,
 					StopReason: StopReasonComplete,
 				}
+				l.enrichResponse(&final)
 				emitStreamEvent(ctx, ch, StreamEvent{Type: StreamEventDone, Final: &final})
 				return
 			}

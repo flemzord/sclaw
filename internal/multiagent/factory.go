@@ -27,10 +27,11 @@ import (
 
 // FactoryConfig holds dependencies for MultiAgentFactory.
 type FactoryConfig struct {
-	Registry        *Registry
-	DefaultProvider provider.Provider
-	GlobalTools     *tool.Registry
-	Logger          *slog.Logger
+	Registry            *Registry
+	DefaultProvider     provider.Provider
+	DefaultProviderName string
+	GlobalTools         *tool.Registry
+	Logger              *slog.Logger
 
 	// AuditLogger, if non-nil, is wired into each per-session tool registry
 	// so that tool executions are recorded in the audit log.
@@ -241,6 +242,7 @@ func (f *Factory) buildLoopConfig(cfg AgentConfig) agent.LoopConfig {
 		MaxIterations: cfg.Loop.MaxIterations,
 		TokenBudget:   cfg.Loop.TokenBudget,
 		LoopThreshold: cfg.Loop.LoopThreshold,
+		ProviderName:  f.providerName(),
 	}
 	if cfg.Loop.Timeout != "" {
 		if d, err := time.ParseDuration(cfg.Loop.Timeout); err == nil {
@@ -248,6 +250,17 @@ func (f *Factory) buildLoopConfig(cfg AgentConfig) agent.LoopConfig {
 		}
 	}
 	return lc
+}
+
+// providerName returns the identifier of the default provider module.
+func (f *Factory) providerName() string {
+	if f.cfg.DefaultProviderName != "" {
+		return f.cfg.DefaultProviderName
+	}
+	if f.cfg.DefaultProvider != nil {
+		return f.cfg.DefaultProvider.ModelName()
+	}
+	return ""
 }
 
 // ResolveHistory returns the persistent HistoryStore for the given agent.

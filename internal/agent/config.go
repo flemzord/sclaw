@@ -25,6 +25,10 @@ type LoopConfig struct {
 	// LoopThreshold is how many times the same tool call (name + args)
 	// can repeat before the loop is considered stuck.
 	LoopThreshold int
+
+	// ProviderName is the identifier of the provider module (e.g. "provider.openai_compatible").
+	// Propagated to Response.Provider for observability.
+	ProviderName string
 }
 
 // withDefaults returns a copy with zero fields replaced by defaults.
