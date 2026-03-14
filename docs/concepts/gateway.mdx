@@ -63,6 +63,16 @@ curl http://127.0.0.1:8080/health
 {"status": "ok"}
 ```
 
+#### `GET /metrics`
+
+Prometheus metrics endpoint. Only available when the [`hook.metrics`](/modules/hooks/metrics) module is loaded. The path is configurable (default: `/metrics`).
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+Returns metrics in Prometheus exposition format. See [Observability](/concepts/observability) for details on available metrics and monitoring setup.
+
 ### Monitoring
 
 #### `GET /status`

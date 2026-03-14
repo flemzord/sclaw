@@ -1,0 +1,43 @@
+---
+title: File Write
+description: "Configurable file writing tool"
+icon: "pen"
+---
+
+The `tool.file_write` module provides the `write_file` tool, allowing agents to create and modify files within the workspace and allowed directories.
+
+## Configuration
+
+```yaml
+modules:
+  tool.file_write: {}
+```
+
+## Tool: `write_file`
+
+Writes content to a file, creating it if it doesn't exist or overwriting if it does.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the file (relative to workspace or absolute within allowed dirs) |
+| `content` | string | yes | Content to write |
+
+### Example
+
+```json
+{
+  "path": "output.txt",
+  "content": "Hello, world!"
+}
+```
+
+## Security
+
+- **Path validation**: Paths are resolved and validated against the agent's workspace and `allowed_dirs` configuration (must be `rw` mode). Attempts to write outside allowed directories are rejected.
+- **Approval policy**: By default, `write_file` requires user approval (`ask` policy). This can be configured per-agent in the tool approval settings.
+- Symlinks are resolved before validation to prevent directory traversal attacks.
+- Parent directories are created automatically if they don't exist.
+
+## Module Replacement
+
+This module replaces the built-in `write_file` tool. See [Built-in Tools](/concepts/builtin-tools) for the fallback behavior.

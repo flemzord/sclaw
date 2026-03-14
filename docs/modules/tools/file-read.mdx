@@ -1,0 +1,40 @@
+---
+title: File Read
+description: "Configurable file reading tool"
+icon: "file"
+---
+
+The `tool.file_read` module provides the `read_file` tool, allowing agents to read file contents within the workspace and allowed directories.
+
+## Configuration
+
+```yaml
+modules:
+  tool.file_read: {}
+```
+
+## Tool: `read_file`
+
+Reads the content of a file and returns it as text.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Path to the file (relative to workspace or absolute within allowed dirs) |
+
+### Example
+
+```json
+{
+  "path": "config.yaml"
+}
+```
+
+## Security
+
+- **Path validation**: Paths are resolved and validated against the agent's workspace and `allowed_dirs` configuration. Attempts to read outside allowed directories are rejected.
+- **Read-only**: This tool only reads files, it cannot modify them.
+- Symlinks are resolved before validation to prevent directory traversal attacks.
+
+## Module Replacement
+
+This module replaces the built-in `read_file` tool. See [Built-in Tools](/concepts/builtin-tools) for the fallback behavior.

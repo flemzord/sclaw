@@ -1,0 +1,130 @@
+---
+title: Observability
+description: "Metrics, tracing, and monitoring for sclaw deployments"
+icon: "eye"
+---
+
+sclaw provides built-in observability through two hook modules: Prometheus metrics and OpenTelemetry tracing. Both are optional and can be enabled independently.
+
+## Quick Setup
+
+Enable both metrics and tracing:
+
+```yaml
+modules:
+  hook.metrics:
+    prometheus:
+      path: "/metrics"
+    cost_tracking:
+      enabled: true
+      prices:
+        gpt-4o: { input: 2.5, output: 10.0 }
+
+  hook.tracing:
+    otlp:
+      endpoint: "localhost:4318"
+      insecure: true
+    service:
+      name: sclaw
+```
+
+## Metrics (Prometheus)
+
+The [`hook.metrics`](/modules/hooks/metrics) module exposes a `/metrics` endpoint on the gateway with counters, histograms, and gauges covering:
+
+- **Message throughput** — inbound/outbound per channel
+- **Token usage** — input/output per model and provider
+- **Response latency** — end-to-end histogram
+- **Tool calls** — success/error per tool
+- **Active sessions** — current gauge
+- **Cost estimation** — per model, from a configurable price table
+
+Scrape with any Prometheus-compatible system (Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics).
+
+## Tracing (OpenTelemetry)
+
+The [`hook.tracing`](/modules/hooks/tracing) module exports distributed traces via OTLP to any compatible backend:
+
+- **Jaeger** — local development and debugging
+- **Grafana Tempo** — production-grade trace storage
+- **Honeycomb** — collaborative debugging
+- **Datadog** — full-stack observability
+
+Each message generates a span with attributes for session, agent, model, tokens, latency, and tool calls recorded as span events.
+
+## Gateway Endpoints
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | None | Health check (always available) |
+| `GET /metrics` | None | Prometheus metrics (when `hook.metrics` loaded) |
+| `GET /status` | Required | Runtime status with uptime and session count |
+
+## Monitoring Stack Example
+
+A typical production monitoring stack:
+
+```
+sclaw → Prometheus (scrape /metrics) → Grafana (dashboards)
+sclaw → OTLP Collector → Tempo (traces) → Grafana (trace explorer)
+```
+
+### Docker Compose
+
+```yaml
+services:
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  tempo:
+    image: grafana/tempo
+    ports:
+      - "4318:4318"   # OTLP HTTP
+      - "3200:3200"   # Tempo API
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+```
+
+With `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: sclaw
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+```
+
+## Key Queries
+
+### Prometheus (PromQL)
+
+```promql
+# Request rate per minute
+rate(sclaw_messages_total{direction="inbound"}[5m]) * 60
+
+# P95 latency
+histogram_quantile(0.95, rate(sclaw_response_latency_seconds_bucket[5m]))
+
+# Hourly cost
+rate(sclaw_cost_dollars[1h]) * 3600
+
+# Tool error ratio
+sum(rate(sclaw_tool_calls_total{result="error"}[5m]))
+  / sum(rate(sclaw_tool_calls_total[5m]))
+```
+
+### TraceQL (Tempo)
+
+```
+{ resource.service.name = "sclaw" && span.sclaw.model = "gpt-4o" && duration > 5s }
+```

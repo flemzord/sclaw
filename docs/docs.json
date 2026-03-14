@@ -67,6 +67,8 @@
               "concepts/routing",
               "concepts/context",
               "concepts/prompt-crons",
+              "concepts/hooks",
+              "concepts/observability",
               "concepts/gateway"
             ]
           },
@@ -77,7 +79,12 @@
               "modules/channels/telegram",
               "modules/providers/openai-compatible",
               "modules/providers/openai-responses",
-              "modules/memory/sqlite"
+              "modules/memory/sqlite",
+              "modules/hooks/metrics",
+              "modules/hooks/tracing",
+              "modules/tools/shell",
+              "modules/tools/file-read",
+              "modules/tools/file-write"
             ]
           },
           {

@@ -1,0 +1,100 @@
+---
+title: Prometheus Metrics
+description: "Collect observability metrics and expose them via a Prometheus /metrics endpoint"
+icon: "chart-line"
+---
+
+The `hook.metrics` module collects observability metrics on every agent interaction and exposes them via a Prometheus `/metrics` endpoint on the existing gateway HTTP server.
+
+## Configuration
+
+```yaml
+modules:
+  hook.metrics:
+    exporter: prometheus
+    prometheus:
+      path: "/metrics"
+    cost_tracking:
+      enabled: true
+      prices:
+        claude-sonnet-4-20250514: { input: 3.0, output: 15.0 }
+        gpt-4o: { input: 2.5, output: 10.0 }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `exporter` | string | `prometheus` | Exporter type (only `prometheus` supported) |
+| `prometheus.path` | string | `/metrics` | HTTP path for the metrics endpoint |
+| `cost_tracking.enabled` | bool | `false` | Enable cost estimation |
+| `cost_tracking.prices` | map | — | Per-model pricing (USD per million tokens) |
+
+## Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `sclaw_messages_total` | counter | `channel`, `direction` | Total messages processed (inbound/outbound) |
+| `sclaw_tokens_used` | counter | `type`, `provider`, `model` | Token consumption (input/output) |
+| `sclaw_response_latency_seconds` | histogram | — | End-to-end response latency |
+| `sclaw_provider_errors_total` | counter | `error_type`, `model` | Provider errors |
+| `sclaw_tool_calls_total` | counter | `tool_name`, `result` | Tool calls (success/error) |
+| `sclaw_active_sessions` | gauge | — | Number of active sessions |
+| `sclaw_cost_dollars` | counter | `provider`, `model` | Estimated cost in USD |
+
+## Endpoint
+
+The `/metrics` endpoint is mounted on the existing gateway HTTP server (no separate port). It is **public** (no auth required), similar to `/health`.
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+The output is standard Prometheus exposition format, compatible with any Prometheus scraper.
+
+## Cost Tracking
+
+When `cost_tracking.enabled` is `true`, the module estimates costs based on token usage and the configured price table. Prices are specified in **USD per million tokens**.
+
+```yaml
+cost_tracking:
+  enabled: true
+  prices:
+    gpt-4o:
+      input: 2.5    # $2.50 per 1M input tokens
+      output: 10.0   # $10.00 per 1M output tokens
+    claude-sonnet-4-20250514:
+      input: 3.0
+      output: 15.0
+```
+
+Models not present in the price table are silently skipped (no cost recorded).
+
+## Grafana Dashboard
+
+To visualize metrics in Grafana, add a Prometheus data source pointing to sclaw's `/metrics` endpoint and use queries like:
+
+```promql
+# Message throughput (per minute)
+rate(sclaw_messages_total[5m]) * 60
+
+# Average response latency
+histogram_quantile(0.95, rate(sclaw_response_latency_seconds_bucket[5m]))
+
+# Token usage rate
+rate(sclaw_tokens_used[1h])
+
+# Cost per hour
+rate(sclaw_cost_dollars[1h]) * 3600
+
+# Tool error rate
+rate(sclaw_tool_calls_total{result="error"}[5m])
+  / rate(sclaw_tool_calls_total[5m])
+```
+
+## Architecture
+
+The module uses two hooks:
+
+1. **`before_process`** (priority 0): Stamps the start time into hook metadata for latency measurement.
+2. **`after_send`** (priority 100): Collects all metrics from the `agent.Response` (tokens, tool calls, model, provider, stop reason).
+
+The Prometheus registry is isolated (not the global default), so metrics from other Go libraries don't leak into the sclaw namespace. Go runtime and process metrics are included by default.

@@ -1,0 +1,43 @@
+---
+title: Shell (exec)
+description: "Configurable command execution tool"
+icon: "terminal"
+---
+
+The `tool.shell` module provides the `exec` tool, allowing agents to execute shell commands within the configured workspace.
+
+## Configuration
+
+```yaml
+modules:
+  tool.shell: {}
+```
+
+The module uses the agent's workspace directory as the working directory for all commands. No additional configuration is required — defaults are inherited from the agent config.
+
+## Tool: `exec`
+
+Executes a shell command and returns the output.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `command` | string | yes | The shell command to execute |
+
+### Example
+
+```json
+{
+  "command": "ls -la /tmp"
+}
+```
+
+## Security
+
+- Commands run in a **sanitized environment** — sensitive environment variables (API keys, tokens) are stripped via `security.SanitizedEnv()`.
+- When Docker sandboxing is enabled, commands execute inside a resource-limited container.
+- The URL filter (if configured) restricts network access from spawned processes.
+- Path filtering enforces allowed directories for file operations within commands.
+
+## Module Replacement
+
+This module replaces the built-in `exec` tool. If `tool.shell` is loaded, the built-in version is not registered. If no `tool.*` modules are configured, the built-in tools are used as fallback.

@@ -1,0 +1,155 @@
+---
+title: OpenTelemetry Tracing
+description: "Distributed tracing via OpenTelemetry with OTLP export"
+icon: "magnifying-glass"
+---
+
+The `hook.tracing` module provides distributed tracing via OpenTelemetry, exporting traces to any OTLP-compatible backend such as Jaeger, Grafana Tempo, Honeycomb, Datadog, or any OpenTelemetry Collector.
+
+## Configuration
+
+```yaml
+modules:
+  hook.tracing:
+    exporter: otlp
+    otlp:
+      endpoint: "localhost:4318"
+      protocol: http
+      insecure: true
+      timeout: 10s
+      headers:
+        Authorization: "Bearer your-api-key"
+    service:
+      name: sclaw
+      version: "1.0.0"
+      attributes:
+        environment: production
+        region: eu-west-1
+    sampling:
+      rate: 1.0
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `exporter` | string | `otlp` | Exporter type (only `otlp` supported) |
+| `otlp.endpoint` | string | `localhost:4318` | OTLP receiver endpoint |
+| `otlp.protocol` | string | `http` | Transport protocol (`http` or `grpc`) |
+| `otlp.insecure` | bool | `false` | Disable TLS verification |
+| `otlp.timeout` | duration | `10s` | Export timeout |
+| `otlp.headers` | map | — | Custom HTTP headers (auth tokens, etc.) |
+| `service.name` | string | `sclaw` | Service name in traces |
+| `service.version` | string | — | Service version |
+| `service.attributes` | map | — | Additional resource attributes |
+| `sampling.rate` | float | `1.0` | Sampling rate (0.0–1.0, 1.0 = 100%) |
+
+## Span Structure
+
+Each message processed by sclaw generates a root span:
+
+```
+sclaw.message (server span)
+├── Attributes:
+│   ├── sclaw.session.id
+│   ├── sclaw.session.agent
+│   ├── sclaw.channel
+│   ├── sclaw.chat_id
+│   ├── sclaw.model
+│   ├── sclaw.provider
+│   ├── sclaw.tokens.input
+│   ├── sclaw.tokens.output
+│   ├── sclaw.tokens.total
+│   ├── sclaw.iterations
+│   ├── sclaw.stop_reason
+│   ├── sclaw.tool_calls.count
+│   └── sclaw.latency_seconds
+└── Events:
+    ├── tool_call:exec (tool.name, tool.duration, tool.error?)
+    ├── tool_call:read_file (tool.name, tool.duration)
+    └── ...
+```
+
+## Backend Examples
+
+### Grafana Tempo
+
+```yaml
+modules:
+  hook.tracing:
+    otlp:
+      endpoint: "tempo.example.com:4318"
+      insecure: false
+    service:
+      name: sclaw
+```
+
+### Jaeger
+
+```yaml
+modules:
+  hook.tracing:
+    otlp:
+      endpoint: "localhost:4318"
+      insecure: true
+    service:
+      name: sclaw
+```
+
+Run Jaeger locally with OTLP support:
+
+```bash
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 4318:4318 \
+  jaegertracing/jaeger:latest
+```
+
+Then open `http://localhost:16686` to view traces.
+
+### Honeycomb
+
+```yaml
+modules:
+  hook.tracing:
+    otlp:
+      endpoint: "api.honeycomb.io:443"
+      headers:
+        x-honeycomb-team: "your-api-key"
+    service:
+      name: sclaw
+```
+
+### Datadog
+
+Use the Datadog Agent's OTLP ingestion endpoint:
+
+```yaml
+modules:
+  hook.tracing:
+    otlp:
+      endpoint: "localhost:4318"
+      insecure: true
+    service:
+      name: sclaw
+      attributes:
+        env: production
+```
+
+## Sampling
+
+For high-throughput deployments, reduce the sampling rate to control trace volume:
+
+```yaml
+sampling:
+  rate: 0.1  # Sample 10% of traces
+```
+
+The sampler uses `ParentBased(TraceIDRatioBased)`, meaning child spans inherit the parent's sampling decision. This ensures complete traces when sampled.
+
+## Architecture
+
+The module uses two hooks:
+
+1. **`before_process`** (priority 0): Creates a root span with session and channel attributes, stores it in hook metadata.
+2. **`after_send`** (priority 200): Enriches the span with response data (tokens, model, tool calls as events) and ends it.
+
+The `TracerProvider` is registered globally via `otel.SetTracerProvider()` and shut down gracefully on module stop, flushing any pending spans.

@@ -1,0 +1,88 @@
+---
+title: Hooks
+description: "Message lifecycle hooks for audit, filtering, metrics, and tracing"
+icon: "webhook"
+---
+
+Hooks intercept messages at three positions in the processing pipeline, enabling observability, filtering, mutation, and audit logging without modifying core logic.
+
+## Hook Positions
+
+| Position | When | Use Cases |
+|----------|------|-----------|
+| `before_process` | After group policy, before the agent loop | Message filtering, dropping spam, stamping start time |
+| `before_send` | After the agent loop, before sending the response | Response mutation, content filtering |
+| `after_send` | After the response is sent and persisted | Metrics collection, tracing, audit logging |
+
+## Hook Interface
+
+Every hook implements three methods:
+
+```go
+type Hook interface {
+    Position() Position     // Where in the pipeline
+    Priority() int          // Execution order (lower = first)
+    Execute(ctx, *Context) (Action, error)
+}
+```
+
+## Actions
+
+| Action | Valid For | Behavior |
+|--------|----------|----------|
+| `ActionContinue` | All positions | Proceed normally |
+| `ActionDrop` | `before_process` only | Stop processing this message |
+| `ActionModify` | `before_send` only | Signal that the outbound message was mutated |
+
+## Hook Context
+
+All hooks receive a shared context that carries data through the pipeline:
+
+```go
+type Context struct {
+    Position Position
+    Inbound  message.InboundMessage
+    Session  SessionView
+    Outbound *message.OutboundMessage  // nil for before_process
+    Response *agent.Response           // nil for before_process
+    Metadata map[string]any            // shared across all 3 positions
+    Logger   *slog.Logger
+}
+```
+
+The `Metadata` map is shared across all three positions within a single pipeline execution, allowing hooks to communicate (e.g., a `before_process` hook stamps a start time that an `after_send` hook reads for latency measurement).
+
+## Execution Order
+
+Hooks within the same position are sorted by:
+1. **Priority** (ascending — lower values run first)
+2. **Registration order** (tiebreaker)
+
+Errors from hooks are **logged but never propagated** — a failing hook cannot break the message pipeline.
+
+## Built-in Hook Modules
+
+| Module | Position(s) | Description |
+|--------|-------------|-------------|
+| [`hook.metrics`](/modules/hooks/metrics) | `before_process` + `after_send` | Prometheus metrics collection |
+| [`hook.tracing`](/modules/hooks/tracing) | `before_process` + `after_send` | OpenTelemetry distributed tracing |
+
+## Creating a Hook Module
+
+To create a custom hook module:
+
+1. Create a module in `modules/hook/<name>/`
+2. Implement `core.Module` + `hook.Provider`
+3. Return your hooks from `Hooks() []hook.Hook`
+4. Register via `init()` + `core.RegisterModule`
+
+```go
+// hook.Provider is the discovery interface
+type Provider interface {
+    Hooks() []Hook
+}
+```
+
+The wiring layer automatically discovers modules implementing `hook.Provider` and registers their hooks into the pipeline.
+
+See [Creating Modules](/development/creating-modules) for the full module development guide.
